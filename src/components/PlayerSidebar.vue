@@ -11,7 +11,7 @@ const stats = computed<Array<[string, number]>>(() => [
 
 <template>
   <aside class="player-panel panel">
-    <div class="eyebrow">今世道途</div>
+    <div class="eyebrow">今世道途 · {{ game.player!.entryType === 'initial' ? '初入人间' : game.player!.entryType === 'bloodline' ? '血脉延续' : '轮回转世' }}</div>
     <div class="identity"><div class="avatar">{{ game.player!.name.slice(0, 1) }}</div><div><h2>{{ game.player!.name }}</h2><p>{{ game.player!.origin.name }}</p></div></div>
     <div class="realm-badge"><small>当前境界</small><strong>{{ game.currentRealm.name }}</strong></div>
     <div class="progress-block">
@@ -26,5 +26,6 @@ const stats = computed<Array<[string, number]>>(() => [
     <div class="root-card"><small>灵根</small><b>{{ game.player!.spiritRoot.name }}</b><p>{{ game.player!.spiritRoot.elements.join(' · ') }} · 修炼倍率 {{ game.player!.spiritRoot.multiplier.toFixed(2) }}</p></div>
     <div class="stat-list"><div v-for="stat in stats" :key="stat[0]"><span>{{ stat[0] }}</span><b>{{ stat[1] }}</b><i><em :style="{ width: `${Math.min(100, stat[1])}%` }"></em></i></div></div>
     <div class="talent-tags"><span v-for="talent in game.player!.talents" :key="talent.id" :title="talent.description">{{ talent.name }}</span></div>
+    <div class="bloodline-note"><small>{{ game.player!.bloodline.familyName }}</small><span>{{ game.player!.bloodline.inheritedTraits.join(' · ') || '凡俗血脉' }}</span></div>
   </aside>
 </template>

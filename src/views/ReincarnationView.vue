@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { UPGRADE_CONFIG, upgradeCost, type UpgradeKey } from '../core/reincarnation/reincarnation'
+import { useRouter } from 'vue-router'
+import { FATE_OPTIONS, type FatePurchase } from '../core/reincarnation/reincarnation'
 import { useGameStore } from '../stores/game'
 const game = useGameStore()
-const keys = Object.keys(UPGRADE_CONFIG) as UpgradeKey[]
-const descriptions: Record<UpgradeKey, string> = {
-  comprehensionBonus: '每级令后世悟性 +2', luckBonus: '每级令后世气运 +2', constitutionBonus: '每级令后世体魄 +2', spiritRootLuck: '提高优质灵根的生成权重',
-}
+const router = useRouter()
+const options = Object.keys(FATE_OPTIONS) as FatePurchase[]
+function begin() { game.beginReincarnationCreation(); void router.push('/') }
 </script>
 
 <template>
-  <div class="view-page">
-    <header class="page-head"><div><p class="eyebrow">万般带不走，唯有道果随身</p><h1>轮回</h1><p>永久加成存在上限且成本递增，越往后收益越需慎重取舍。</p></div><div class="points-orb"><strong>{{ game.state.reincarnation.totalPoints }}</strong><small>轮回点</small></div></header>
-    <div v-if="game.player?.alive" class="notice">今世尚在人间。你可以查看轮回道果，但只能在身后参悟。</div>
-    <div class="upgrade-grid"><article v-for="key in keys" :key="key" class="upgrade-card panel"><div class="upgrade-symbol">{{ UPGRADE_CONFIG[key].name.slice(0, 1) }}</div><div><span>永久道果</span><h2>{{ UPGRADE_CONFIG[key].name }}</h2><p>{{ descriptions[key] }}</p><div class="levels"><i v-for="level in UPGRADE_CONFIG[key].max" :key="level" :class="{ filled: level <= game.state.reincarnation.upgrades[key] }"></i></div><small>当前 {{ game.state.reincarnation.upgrades[key] }} / {{ UPGRADE_CONFIG[key].max }} 级</small></div><button class="button" :disabled="!!game.player?.alive || game.state.reincarnation.upgrades[key] >= UPGRADE_CONFIG[key].max || game.state.reincarnation.totalPoints < upgradeCost(key, game.state.reincarnation.upgrades[key])" @click="game.buyUpgrade(key)">参悟 · {{ upgradeCost(key, game.state.reincarnation.upgrades[key]) }} 点</button></article></div>
+  <div class="view-page reincarnation-page">
+    <header class="page-head"><div><p class="eyebrow">轮回点购买的是选择命运的权限</p><h1>轮回殿</h1><p>所有加持仅作用于即将开始的一世，不会无限叠加面板。</p></div><div class="points-orb"><strong>{{ game.state.reincarnation.totalPoints }}</strong><small>轮回点</small></div></header>
+    <div v-if="!game.state.reincarnation.inHall" class="notice">{{ game.player?.alive ? '今世尚在人间。轮回殿只向身后之人开启。' : '请先在死亡结算页选择轮回转世。' }}</div>
+    <section class="selection-summary panel"><div><span>额外天赋点</span><b>+{{ game.state.reincarnation.selections.extraTalentPoints }}</b></div><div><span>属性上限</span><b>+{{ game.state.reincarnation.selections.statCapBonus }}</b></div><div><span>天赋权限</span><b>{{ game.state.reincarnation.selections.maxTalentQuality }}</b></div><div><span>手选灵根</span><b>品阶 {{ game.state.reincarnation.selections.maxRootRank }}</b></div></section>
+    <div class="fate-grid"><article v-for="key in options" :key="key" class="fate-card panel"><div><span class="eyebrow">下一世加持</span><h2>{{ FATE_OPTIONS[key].name }}</h2><p>{{ FATE_OPTIONS[key].description }}</p></div><button class="button" :disabled="!game.canPurchaseFate(key)" @click="game.purchaseFate(key)">{{ game.canPurchaseFate(key) ? `参悟 · ${FATE_OPTIONS[key].cost} 点` : '暂不可参悟' }}</button></article></div>
+    <footer class="hall-footer"><p>未花费的轮回点将继续保留。</p><button class="primary" :disabled="!game.state.reincarnation.inHall" @click="begin">带着选择进入下一世</button></footer>
   </div>
 </template>

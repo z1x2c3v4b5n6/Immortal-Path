@@ -1,12 +1,16 @@
-import type { Origin } from '../models'
+import type { OriginDefinition, PlayerStats } from '../models'
 
-export const ORIGINS: Origin[] = [
-  { id: 'farmer', name: '农户之子', description: '筋骨扎实，识字不多。', stones: 2, statChanges: { constitution: 8 }, rootLuck: 0 },
-  { id: 'hunter', name: '猎户之家', description: '熟悉山野，也知敬畏。', stones: 4, statChanges: { constitution: 6, luck: 3 }, rootLuck: 0 },
-  { id: 'merchant', name: '商贾之家', description: '家资尚可，耳目灵通。', stones: 20, statChanges: { charm: 7 }, rootLuck: 0 },
-  { id: 'scholar', name: '书香门第', description: '自幼读经，悟性不俗。', stones: 6, statChanges: { comprehension: 9 }, rootLuck: 1 },
-  { id: 'fallen', name: '没落修仙家族', description: '旧谱中还留着引气法门。', stones: 18, statChanges: { soul: 7 }, rootLuck: 4 },
-  { id: 'clan', name: '修仙世家', description: '在灵气与期许中长大。', stones: 45, statChanges: { comprehension: 4, luck: 4 }, rootLuck: 8 },
-  { id: 'mystery', name: '神秘弃婴', description: '身世空白，命数难测。', stones: 1, statChanges: { luck: 11, soul: 5 }, rootLuck: 6 },
-  { id: 'sect', name: '宗门后裔', description: '出生便在山门之内。', stones: 32, statChanges: { comprehension: 6, charm: 5 }, rootLuck: 7 },
+const stats = (comprehension: number, luck: number, constitution: number, soul: number, charm: number): PlayerStats => ({ comprehension, luck, constitution, soul, charm })
+
+export const ORIGINS: OriginDefinition[] = [
+  { id: 'farmer', name: '农户', description: '起点低，资源少，却有最宽阔的可塑空间。', baseStats: stats(45, 50, 60, 40, 45), statCaps: stats(78, 82, 86, 76, 78), freeStatPoints: 40, talentPoints: 5, startingRealmIndex: 0, startingCultivation: 0, startingSpiritStones: 50, modifiers: [{ type: 'freedom', value: 1, description: '自由属性点较多' }], tags: ['凡俗', '坚韧', '自由'], firstGenerationAvailable: true },
+  { id: 'hunter', name: '猎户', description: '熟悉山林险途，拥有强健体魄和敏锐神识。', baseStats: stats(42, 50, 65, 55, 40), statCaps: stats(72, 82, 90, 86, 68), freeStatPoints: 32, talentPoints: 5, startingRealmIndex: 0, startingCultivation: 0, startingSpiritStones: 65, modifiers: [{ type: 'adventureSafety', value: .15, description: '历练受伤风险降低 15%' }], tags: ['凡俗', '山野', '生存'], firstGenerationAvailable: true },
+  { id: 'merchant', name: '商贾', description: '家资丰厚且长于交游，肉身体质则较为平常。', baseStats: stats(50, 55, 40, 45, 65), statCaps: stats(80, 86, 68, 76, 92), freeStatPoints: 30, talentPoints: 4, startingRealmIndex: 0, startingCultivation: 0, startingSpiritStones: 260, modifiers: [{ type: 'marketReward', value: .2, description: '交易类收益提高 20%' }], tags: ['凡俗', '富足', '人脉'], firstGenerationAvailable: true },
+  { id: 'scholar', name: '书香门第', description: '经史启智，悟性与神识出众，体魄稍显单薄。', baseStats: stats(68, 48, 38, 60, 55), statCaps: stats(96, 78, 65, 91, 84), freeStatPoints: 28, talentPoints: 5, startingRealmIndex: 0, startingCultivation: 10, startingSpiritStones: 80, modifiers: [{ type: 'insight', value: .12, description: '顿悟收益提高 12%' }], tags: ['凡俗', '学识', '悟道'], firstGenerationAvailable: true },
+  { id: 'mystery', name: '神秘弃婴', description: '身世无人知晓，神魂强盛，却孑然一身。', baseStats: stats(50, 60, 35, 85, 45), statCaps: stats(84, 92, 64, 108, 78), freeStatPoints: 25, talentPoints: 6, startingRealmIndex: 0, startingCultivation: 0, startingSpiritStones: 0, modifiers: [{ type: 'hiddenEvent', value: .3, description: '隐藏奇遇权重提高 30%' }], tags: ['未知', '孤身', '神魂'], firstGenerationAvailable: true },
+  { id: 'fallen', name: '没落修仙家族', description: '祖上曾有仙缘，旧宅仍藏着残缺法门。', baseStats: stats(58, 55, 50, 62, 52), statCaps: stats(92, 90, 82, 94, 85), freeStatPoints: 34, talentPoints: 6, startingRealmIndex: 0, startingCultivation: 45, startingSpiritStones: 180, modifiers: [{ type: 'rootLuck', value: 6, description: '优质灵根权重提高' }], tags: ['修仙血脉', '旧族'], firstGenerationAvailable: false, unlockCost: 90 },
+  { id: 'clan', name: '修仙世家', description: '出生便受灵气滋养，也背负家族期许。', baseStats: stats(62, 58, 55, 60, 58), statCaps: stats(96, 94, 90, 96, 90), freeStatPoints: 30, talentPoints: 7, startingRealmIndex: 1, startingCultivation: 20, startingSpiritStones: 360, modifiers: [{ type: 'rootLuck', value: 12, description: '优质灵根权重大幅提高' }], tags: ['修仙血脉', '世家'], firstGenerationAvailable: false, unlockCost: 180 },
+  { id: 'sect', name: '宗门后裔', description: '在山门钟声里长大，起步高而自由略少。', baseStats: stats(64, 52, 56, 66, 60), statCaps: stats(98, 88, 90, 100, 92), freeStatPoints: 25, talentPoints: 7, startingRealmIndex: 1, startingCultivation: 60, startingSpiritStones: 300, modifiers: [{ type: 'cultivation', value: .08, description: '修炼效率提高 8%' }], tags: ['宗门', '修仙血脉'], firstGenerationAvailable: false, unlockCost: 220 },
 ]
+
+export const originById = (id: string) => ORIGINS.find((origin) => origin.id === id) ?? ORIGINS[0]

@@ -15,7 +15,7 @@ export function createWorld(): WorldState {
       { id: 'sword', name: '天剑门', power: 74, status: '鼎盛' },
       { id: 'danxia', name: '丹霞谷', power: 61, status: '安定' },
       { id: 'blood', name: '血魔宗', power: 57, status: '蛰伏' },
-    ], npcs: [],
+    ], npcs: [], descendants: [], families: [],
   }
 }
 
@@ -29,5 +29,10 @@ export function simulateWorld(world: WorldState, months: number, rng: RandomServ
   for (const sect of world.sects) {
     sect.power = Math.max(10, Math.min(100, sect.power + rng.randomInt(-2, 3)))
     sect.status = sect.power > 75 ? '鼎盛' : sect.power > 55 ? '昌盛' : sect.power > 35 ? '守成' : '衰微'
+  }
+  for (const descendant of world.descendants) {
+    if (!descendant.alive || descendant.isPlayer) continue
+    descendant.ageMonths += months
+    if (descendant.ageMonths >= descendant.lifespanMonths) descendant.alive = false
   }
 }

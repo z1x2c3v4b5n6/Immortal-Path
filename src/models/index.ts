@@ -1,14 +1,12 @@
 export type StatKey = 'comprehension' | 'luck' | 'constitution' | 'soul' | 'charm'
+export type PlayerStats = Record<StatKey, number>
 export type ItemQuality = '凡品' | '良品' | '精品' | '稀有' | '极品' | '奇珍'
 export type ItemType = '丹药' | '材料' | '法器' | '特殊' | '传承'
+export type EntryType = 'initial' | 'bloodline' | 'reincarnation'
+export type TalentQuality = '普通' | '优秀' | '稀有' | '极品' | '传说'
+export type OriginSecret = '普通弃婴' | '修士遗孤' | '魔修血脉' | '妖族血脉' | '大能转世' | '古族后裔'
 
-export interface Stats {
-  comprehension: number
-  luck: number
-  constitution: number
-  soul: number
-  charm: number
-}
+export interface Modifier { type: string; value: number; description: string }
 
 export interface SpiritRoot {
   id: string
@@ -18,23 +16,49 @@ export interface SpiritRoot {
   elements: string[]
 }
 
-export interface Talent {
-  id: string
-  name: string
-  description: string
-  cultivationMultiplier?: number
-  breakthroughBonus?: number
-  lifespanYears?: number
-  statChanges?: Partial<Stats>
+export interface TalentEffect {
+  type: 'stat' | 'cultivationMultiplier' | 'breakthroughBonus' | 'lifespanMultiplier' | 'eventWeight' | 'future'
+  stat?: StatKey
+  value: number
 }
 
-export interface Origin {
+export interface UnlockRequirement { type: 'achievement' | 'rareEvents' | 'generation'; value: string | number; description: string }
+
+export interface TalentDefinition {
+  id: string
+  name: string
+  quality: TalentQuality
+  cost: number
+  description: string
+  effects: TalentEffect[]
+  unlockRequirement?: UnlockRequirement
+  firstGenerationAvailable: boolean
+}
+
+export interface TalentInstance extends TalentDefinition { acquiredGeneration: number }
+
+export interface OriginDefinition {
   id: string
   name: string
   description: string
-  stones: number
-  statChanges: Partial<Stats>
-  rootLuck: number
+  baseStats: PlayerStats
+  statCaps: PlayerStats
+  freeStatPoints: number
+  talentPoints: number
+  startingRealmIndex: number
+  startingCultivation: number
+  startingSpiritStones: number
+  modifiers: Modifier[]
+  tags: string[]
+  firstGenerationAvailable: boolean
+  unlockCost?: number
+}
+
+export interface BloodlineState {
+  familyId: string
+  familyName: string
+  bloodlineLevel: number
+  inheritedTraits: string[]
 }
 
 export interface InventoryItem { itemId: string; quantity: number }
@@ -50,15 +74,56 @@ export interface Player {
   cultivation: number
   cultivationRequired: number
   spiritRoot: SpiritRoot
-  stats: Stats
+  stats: PlayerStats
   spiritStones: number
   inventory: InventoryItem[]
-  talents: Talent[]
-  origin: Origin
+  talents: TalentInstance[]
+  talentPoints: number
+  origin: OriginDefinition
+  originSecret?: OriginSecret
+  familyId: string
+  bloodline: BloodlineState
+  entryType: EntryType
+  parentId?: string
+  predecessorName?: string
   alive: boolean
   causeOfDeath?: string
   achievements: string[]
   timeline: TimelineEvent[]
+}
+
+export interface Descendant {
+  id: string
+  name: string
+  parents: string[]
+  generation: number
+  birthYear: number
+  ageMonths: number
+  lifespanMonths: number
+  realmIndex: number
+  cultivation: number
+  spiritRoot: SpiritRoot
+  stats: PlayerStats
+  talents: TalentInstance[]
+  origin: OriginDefinition
+  bloodlineTags: string[]
+  familyId: string
+  alive: boolean
+  isPlayer?: boolean
+  inventory: InventoryItem[]
+  spiritStones: number
+}
+
+export interface FamilyState {
+  id: string
+  name: string
+  founderId: string
+  foundedYear: number
+  wealth: number
+  inventory: InventoryItem[]
+  reputation: number
+  bloodline: BloodlineState
+  memberIds: string[]
 }
 
 export interface RealmDefinition {
@@ -94,11 +159,14 @@ export interface WorldState {
   worldEvents: WorldEvent[]
   sects: SectState[]
   npcs: NPC[]
+  descendants: Descendant[]
+  families: FamilyState[]
 }
 
 export interface LifeRecord {
   generation: number
   playerName: string
+  playerId: string
   birthYear: number
   deathYear: number
   maxRealm: string
@@ -107,11 +175,28 @@ export interface LifeRecord {
   achievements: string[]
   timeline: TimelineEvent[]
   pointsEarned: number
+  entryType: EntryType
+  parentId?: string
+  predecessorName?: string
+  familyId: string
+}
+
+export interface ReincarnationSelections {
+  extraTalentPoints: number
+  statCapBonus: number
+  maxTalentQuality: TalentQuality
+  maxRootRank: number
+  advancedOriginAccess: boolean
+  carryMemory: boolean
 }
 
 export interface ReincarnationState {
   totalPoints: number
-  upgrades: Record<'comprehensionBonus' | 'luckBonus' | 'constitutionBonus' | 'spiritRootLuck', number>
+  unlockedTalents: string[]
+  unlockedOrigins: string[]
+  rareEventCount: number
+  selections: ReincarnationSelections
+  inHall: boolean
 }
 
 export interface PityState { rollsWithoutRare: number; rollsWithoutEpic: number }
@@ -124,6 +209,17 @@ export interface EventOption { id: string; label: string; requirement?: EventReq
 export interface GameEvent { id: string; title: string; description: string; weight: number; minRealmIndex?: number; options: EventOption[] }
 
 export interface PendingEvent { eventId: string }
+export interface CharacterBuild {
+  name: string
+  originId: string
+  spiritRoot: SpiritRoot
+  stats: PlayerStats
+  talentIds: string[]
+  talentBudget: number
+  randomRoot: boolean
+  randomTalents: boolean
+}
+
 export interface GameSave {
   id: 'main'
   version: number

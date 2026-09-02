@@ -8,7 +8,7 @@ export function calculateBreakthroughChance(player: Player): BreakthroughChance 
   const spiritRoot = (player.spiritRoot.rank - 3) * 0.018
   const comprehension = (player.stats.comprehension - 50) * 0.002
   const luck = (player.stats.luck - 50) * 0.0009
-  const talent = player.talents.reduce((sum, entry) => sum + (entry.breakthroughBonus ?? 0), 0)
+  const talent = player.talents.reduce((sum, entry) => sum + entry.effects.filter((effect) => effect.type === 'breakthroughBonus').reduce((value, effect) => value + effect.value, 0), 0)
   const final = Math.max(0.12, Math.min(0.96, base + spiritRoot + comprehension + luck + talent))
   return { base, spiritRoot, comprehension, luck, talent, final }
 }
