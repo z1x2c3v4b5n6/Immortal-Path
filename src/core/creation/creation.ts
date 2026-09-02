@@ -1,7 +1,7 @@
 import { ORIGINS, originById } from '../../data/origins'
-import { SPIRIT_ROOT_ARCHETYPES, SPIRIT_ROOT_CONFIG } from '../../data/spiritRoots'
+import { createSpiritRoot, MUTATED_ELEMENTS, ROOT_COUNT_RULES, ROOT_QUALITY_RULES, SPIRIT_ROOT_CONFIG, spiritRootPotentialModifiers, STANDARD_ELEMENTS } from '../../data/spiritRoots'
 import { instantiateTalent, TALENTS, talentById } from '../../data/talents'
-import type { CharacterBuild, Descendant, EntryType, OriginDefinition, OriginSecret, Player, PlayerStats, ReincarnationState, SpiritRoot, StatKey, TalentDefinition, TalentQuality } from '../../models'
+import type { CharacterBuild, Descendant, EntryType, OriginDefinition, OriginSecret, Player, PlayerStats, ReincarnationState, SpiritElement, SpiritRoot, SpiritRootQuality, StatKey, TalentDefinition, TalentQuality } from '../../models'
 import type { RandomService } from '../random/RandomService'
 import { REALMS } from '../../data/realms'
 
@@ -18,9 +18,11 @@ export function allocateStat(stats: PlayerStats, key: StatKey, delta: number, or
   return { stats: { ...stats, [key]: stats[key] + delta }, remaining: remaining - delta }
 }
 
-export function randomizeStats(origin: OriginDefinition, capBonus: number, rng: RandomService): PlayerStats {
+export const totalFreeStatPoints = (origin: OriginDefinition, spiritRoot: SpiritRoot) => origin.freeStatPoints + spiritRoot.statPointBonus
+
+export function randomizeStats(origin: OriginDefinition, capBonus: number, rng: RandomService, bonusPoints = 0): PlayerStats {
   const result = { ...origin.baseStats }
-  let remaining = origin.freeStatPoints
+  let remaining = origin.freeStatPoints + bonusPoints
   while (remaining > 0) {
     const available = STAT_KEYS.filter((key) => result[key] < origin.statCaps[key] + capBonus)
     if (!available.length) break
@@ -30,13 +32,24 @@ export function randomizeStats(origin: OriginDefinition, capBonus: number, rng: 
   return result
 }
 
-export function randomSpiritRoot(rng: RandomService, rootLuck = 0, maxRank = 7): SpiritRoot {
-  const eligible = SPIRIT_ROOT_ARCHETYPES.filter((root) => root.rank <= maxRank)
-  const chosen = rng.weightedRandom(eligible.map(({ weight, ...root }) => ({
-    value: root,
-    weight: weight * (1 + Math.max(0, root.rank - 3) * rootLuck / 45) * (root.rank >= 6 ? SPIRIT_ROOT_CONFIG.variantWeightBonus : 1),
+export interface RandomSpiritRootOptions { allowMutation?: boolean; allowHeavenly?: boolean }
+
+export function randomSpiritRoot(rng: RandomService, rootLuck = 0, options: RandomSpiritRootOptions = {}): SpiritRoot {
+  // 第一阶段：决定广度。数量不代表稀有度，也不受“越少越好”的旧阶梯影响。
+  const count = rng.weightedRandom(ROOT_COUNT_RULES.map((rule) => ({ value: rule.count, weight: rule.randomWeight })))
+  // 第二阶段：从五行中无放回抽取元素。
+  const pool = [...STANDARD_ELEMENTS]
+  const elements: SpiritElement[] = []
+  while (elements.length < count) elements.push(pool.splice(rng.randomInt(0, pool.length - 1), 1)[0])
+  // 第三阶段：独立判定异变与品质；随机模式始终保留抽到稀有结果的可能。
+  const mutationChance = options.allowMutation === false ? 0 : SPIRIT_ROOT_CONFIG.mutationChance * (1 + Math.max(0, rootLuck) / 80)
+  if (rng.chance(mutationChance)) elements[rng.randomInt(0, elements.length - 1)] = rng.pick(MUTATED_ELEMENTS)
+  const qualities: SpiritRootQuality[] = options.allowHeavenly === false ? ['NORMAL', 'PURE'] : ['NORMAL', 'PURE', 'HEAVENLY']
+  const quality = rng.weightedRandom(qualities.map((value) => ({
+    value,
+    weight: ROOT_QUALITY_RULES[value].randomWeight * (value === 'NORMAL' ? 1 : 1 + Math.max(0, rootLuck) * SPIRIT_ROOT_CONFIG.qualityLuckScale),
   })))
-  return structuredClone(chosen)
+  return createSpiritRoot(elements, quality)
 }
 
 export function isTalentUnlocked(talent: TalentDefinition, reincarnation: ReincarnationState, completedLives: number) {
@@ -70,14 +83,13 @@ export function randomTalentIds(budget: number, pool: TalentDefinition[], rng: R
 
 export function validateBuild(build: CharacterBuild, origin: OriginDefinition, capBonus: number, talentPool: TalentDefinition[]) {
   const spentStats = STAT_KEYS.reduce((sum, key) => sum + build.stats[key] - origin.baseStats[key], 0)
-  if (spentStats !== origin.freeStatPoints) return '请分配完全部属性点。'
+  if (spentStats !== totalFreeStatPoints(origin, build.spiritRoot)) return '请分配完全部属性点。'
   if (STAT_KEYS.some((key) => build.stats[key] < origin.baseStats[key] || build.stats[key] > origin.statCaps[key] + capBonus)) return '属性超出了当前出身的合法范围。'
   const picked = build.talentIds.map(talentById).filter((talent): talent is TalentDefinition => Boolean(talent))
   if (picked.some((talent) => !talentPool.some((entry) => entry.id === talent.id))) return '所选天赋尚未解锁。'
   if (picked.reduce((sum, talent) => sum + talent.cost, 0) > build.talentBudget) return '天赋点不足。'
-  if (!build.spiritRoot || build.spiritRoot.rank < 1) return '请选择灵根。'
-  const expectedElements = build.spiritRoot.rank <= 5 ? 6 - build.spiritRoot.rank : build.spiritRoot.elements.length
-  if (!build.randomRoot && build.spiritRoot.elements.length !== expectedElements) return '请选择完整的灵根元素组合。'
+  if (!build.spiritRoot || build.spiritRoot.elements.length < 1 || build.spiritRoot.elements.length > 5) return '请选择灵根。'
+  if (new Set(build.spiritRoot.elements).size !== build.spiritRoot.elements.length) return '灵根元素不可重复。'
   return ''
 }
 
@@ -85,7 +97,15 @@ function talentStatEffects(stats: PlayerStats, talents: TalentDefinition[]) {
   for (const talent of talents) for (const effect of talent.effects) if (effect.type === 'stat' && effect.stat) stats[effect.stat] += effect.value
 }
 
-export function createPlayerFromBuild(build: CharacterBuild, generation: number, worldYear: number, entryType: EntryType, familyId: string, familyName: string, rng: RandomService, predecessorName?: string): Player {
+export function createStatPotential(origin: OriginDefinition, capBonus: number, rng: RandomService, current?: PlayerStats, spiritRoot?: SpiritRoot): PlayerStats {
+  const rootModifiers = spiritRoot ? spiritRootPotentialModifiers(spiritRoot) : {}
+  return Object.fromEntries(STAT_KEYS.map((key) => {
+    const variation = origin.id === 'mystery' && key !== 'soul' ? rng.randomInt(-6, 8) : 0
+    return [key, Math.max(current?.[key] ?? 1, origin.statCaps[key] + capBonus + variation + (rootModifiers[key] ?? 0))]
+  })) as PlayerStats
+}
+
+export function createPlayerFromBuild(build: CharacterBuild, generation: number, worldYear: number, entryType: EntryType, familyId: string, familyName: string, rng: RandomService, potentialBonus = 0, predecessorName?: string): Player {
   const origin = originById(build.originId)
   const talents = build.talentIds.map(talentById).filter((talent): talent is TalentDefinition => Boolean(talent))
   const finalStats = { ...build.stats }
@@ -97,7 +117,7 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
     id: crypto.randomUUID(), name: build.name.trim() || rng.pick(['沈砚', '林昭', '顾长风', '苏问雪', '江照夜', '叶知秋']), generation,
     birthYear: worldYear - 16, ageMonths: 192, lifespanMonths: Math.round((realm.baseLifespanYears * 12 + Math.max(0, finalStats.constitution - 50) * 2) * lifespanMultiplier),
     realmIndex: origin.startingRealmIndex, cultivation: origin.startingCultivation, cultivationRequired: realm.cultivationRequired,
-    spiritRoot: structuredClone(build.spiritRoot), stats: finalStats, spiritStones: origin.startingSpiritStones, inventory: [],
+    spiritRoot: structuredClone(build.spiritRoot), stats: finalStats, statPotential: createStatPotential(origin, potentialBonus, rng, finalStats, build.spiritRoot), statHistory: [], spiritStones: origin.startingSpiritStones, inventory: [],
     talents: talents.map((talent) => instantiateTalent(talent, generation)), talentPoints: build.talentBudget, origin, originSecret: origin.id === 'mystery' ? rng.pick(secrets) : undefined,
     familyId, bloodline: { familyId, familyName, bloodlineLevel: entryType === 'initial' ? 1 : 0, inheritedTraits: origin.tags.filter((tag) => tag.includes('血脉')) },
     entryType, predecessorName, alive: true, achievements: [], timeline: [],
@@ -111,8 +131,9 @@ export function selectableOrigins(firstGeneration: boolean, reincarnation: Reinc
 export function generateDescendant(parent: Player, worldYear: number, rng: RandomService): Descendant {
   const fluctuation = () => rng.randomInt(-13, 13)
   const inheritedStats = Object.fromEntries(STAT_KEYS.map((key) => [key, Math.max(30, Math.round(parent.stats[key] * .68 + 18 + fluctuation()))])) as PlayerStats
-  const inheritedRankBoost = Math.max(0, Math.floor((parent.spiritRoot.rank - 3) / 2))
-  const spiritRoot = randomSpiritRoot(rng, inheritedRankBoost * 5, Math.min(7, 5 + inheritedRankBoost))
+  const inheritedPotential = Object.fromEntries(STAT_KEYS.map((key) => [key, Math.max(inheritedStats[key], Math.round(parent.statPotential[key] * .72 + 15 + fluctuation()))])) as PlayerStats
+  const inheritedRootLuck = (parent.spiritRoot.quality === 'HEAVENLY' ? 12 : parent.spiritRoot.quality === 'PURE' ? 6 : 0) + parent.spiritRoot.mutations.length * 4
+  const spiritRoot = randomSpiritRoot(rng, inheritedRootLuck)
   const inheritedTalents = parent.talents.filter(() => rng.chance(.18)).slice(0, 2).map((talent) => ({ ...talent, acquiredGeneration: parent.generation + 1 }))
   const surname = parent.name.slice(0, 1)
   const name = `${surname}${rng.pick(['清河', '念安', '望舒', '知微', '云岫', '景行', '明夷', '若木'])}`
@@ -120,7 +141,7 @@ export function generateDescendant(parent: Player, worldYear: number, rng: Rando
   return {
     id: crypto.randomUUID(), name, parents: [parent.id], generation: parent.generation + 1, birthYear: worldYear - ageYears,
     ageMonths: ageYears * 12, lifespanMonths: REALMS[0].baseLifespanYears * 12 + Math.max(0, inheritedStats.constitution - 50) * 2,
-    realmIndex: ageYears >= 18 && rng.chance(.45) ? Math.min(3, parent.realmIndex) : 0, cultivation: 0, spiritRoot, stats: inheritedStats,
+    realmIndex: ageYears >= 18 && rng.chance(.45) ? Math.min(3, parent.realmIndex) : 0, cultivation: 0, spiritRoot, stats: inheritedStats, statPotential: inheritedPotential,
     talents: inheritedTalents, origin: parent.origin, bloodlineTags: [...new Set([...parent.bloodline.inheritedTraits, ...parent.origin.tags.filter((tag) => tag.includes('血脉'))])],
     familyId: parent.familyId, alive: true, inventory: [], spiritStones: Math.round(parent.spiritStones * .08),
   }

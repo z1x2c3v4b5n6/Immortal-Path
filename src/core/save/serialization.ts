@@ -1,13 +1,43 @@
 import { originById } from '../../data/origins'
+import { CREATION_CONFIG, ROOT_STAT_POINT_BONUS } from '../../data/creationConfig'
 import { SPIRIT_ROOT_ARCHETYPES } from '../../data/spiritRoots'
 import { instantiateTalent, talentById } from '../../data/talents'
-import type { EntryType, GameSave, LifeRecord, Player, ReincarnationState, TalentDefinition, TalentInstance, WorldState } from '../../models'
+import type { Descendant, EntryType, GameSave, LifeRecord, Player, PlayerStats, ReincarnationState, SpiritRoot, TalentDefinition, TalentInstance, WorldState } from '../../models'
 import { initialReincarnation } from '../reincarnation/reincarnation'
 import { createWorld } from '../world/world'
 
-export const CURRENT_SAVE_VERSION = 2
+export const CURRENT_SAVE_VERSION = 3
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
+
+function migrateRoot(value: unknown): SpiritRoot {
+  const old = record(value)
+  const rank = typeof old.rank === 'number' ? old.rank : 1
+  const fallback = SPIRIT_ROOT_ARCHETYPES.find((root) => root.rank === rank) ?? SPIRIT_ROOT_ARCHETYPES[0]
+  return { ...(fallback as SpiritRoot), ...(old as Partial<SpiritRoot>), statPointBonus: ROOT_STAT_POINT_BONUS[rank] ?? 0 }
+}
+
+function migratePotential(value: unknown, stats: PlayerStats, originId: string): PlayerStats {
+  const old = record(value)
+  const caps = originById(originId).statCaps
+  return {
+    comprehension: typeof old.comprehension === 'number' ? old.comprehension : Math.max(stats.comprehension, caps.comprehension),
+    luck: typeof old.luck === 'number' ? old.luck : Math.max(stats.luck, caps.luck),
+    constitution: typeof old.constitution === 'number' ? old.constitution : Math.max(stats.constitution, caps.constitution),
+    soul: typeof old.soul === 'number' ? old.soul : Math.max(stats.soul, caps.soul),
+    charm: typeof old.charm === 'number' ? old.charm : Math.max(stats.charm, caps.charm),
+  }
+}
+
+function migrateDescendants(value: unknown): Descendant[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    const old = record(entry)
+    const originId = typeof record(old.origin).id === 'string' ? String(record(old.origin).id) : 'farmer'
+    const stats = old.stats as PlayerStats
+    return { ...(old as unknown as Descendant), origin: originById(originId), spiritRoot: migrateRoot(old.spiritRoot), stats, statPotential: migratePotential(old.statPotential, stats, originId) }
+  })
+}
 
 function migrateTalents(value: unknown, generation: number): TalentInstance[] {
   if (!Array.isArray(value)) return []
@@ -51,13 +81,14 @@ function migratePlayer(value: unknown, world: WorldState): Player | null {
   const id = typeof old.id === 'string' ? old.id : crypto.randomUUID()
   const familyId = typeof old.familyId === 'string' ? old.familyId : `family-${id}`
   const entryType: EntryType = old.entryType === 'bloodline' || old.entryType === 'reincarnation' ? old.entryType : 'initial'
+  const stats = old.stats as PlayerStats
   return {
     ...(old as unknown as Player), id, generation, origin, familyId, entryType,
-    talents: migrateTalents(old.talents, generation), talentPoints: typeof old.talentPoints === 'number' ? old.talentPoints : origin.talentPoints,
+    talents: migrateTalents(old.talents, generation), talentPoints: typeof old.talentPoints === 'number' ? old.talentPoints : CREATION_CONFIG.baseTalentPoints,
     bloodline: old.bloodline && typeof old.bloodline === 'object' ? old.bloodline as Player['bloodline'] : { familyId, familyName: `${typeof old.name === 'string' ? old.name.slice(0, 1) : '无'}氏`, bloodlineLevel: 1, inheritedTraits: [] },
     originSecret: typeof old.originSecret === 'string' ? old.originSecret as Player['originSecret'] : undefined,
-    spiritRoot: old.spiritRoot && typeof old.spiritRoot === 'object' ? old.spiritRoot as Player['spiritRoot'] : SPIRIT_ROOT_ARCHETYPES[0],
-    stats: old.stats as Player['stats'], inventory: Array.isArray(old.inventory) ? old.inventory as Player['inventory'] : [],
+    spiritRoot: migrateRoot(old.spiritRoot), stats, statPotential: migratePotential(old.statPotential, stats, origin.id),
+    statHistory: Array.isArray(old.statHistory) ? old.statHistory as Player['statHistory'] : [], inventory: Array.isArray(old.inventory) ? old.inventory as Player['inventory'] : [],
     achievements: Array.isArray(old.achievements) ? old.achievements as string[] : [], timeline: Array.isArray(old.timeline) ? old.timeline as Player['timeline'] : [],
     alive: old.alive !== false, birthYear: typeof old.birthYear === 'number' ? old.birthYear : world.currentYear - 16,
   }
@@ -88,7 +119,7 @@ export function migrateSave(value: unknown): GameSave {
     worldEvents: Array.isArray(oldWorld.worldEvents) ? oldWorld.worldEvents as WorldState['worldEvents'] : [],
     sects: Array.isArray(oldWorld.sects) ? oldWorld.sects as WorldState['sects'] : baseWorld.sects,
     npcs: Array.isArray(oldWorld.npcs) ? oldWorld.npcs as WorldState['npcs'] : [],
-    descendants: Array.isArray(oldWorld.descendants) ? oldWorld.descendants as WorldState['descendants'] : [],
+    descendants: migrateDescendants(oldWorld.descendants),
     families: Array.isArray(oldWorld.families) ? oldWorld.families as WorldState['families'] : [],
   }
   const now = new Date().toISOString()

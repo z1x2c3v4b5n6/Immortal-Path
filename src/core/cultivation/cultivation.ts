@@ -13,5 +13,5 @@ export function calculateCultivationGain(player: Player, months: number): number
   const talentMultiplier = 1 + talentBonus + originBonus
   const comprehensionMultiplier = 0.72 + player.stats.comprehension / 100
   const variance = 0.92 + ((player.stats.luck % 11) / 100)
-  return Math.max(1, Math.round(realm.cultivationBase * months * player.spiritRoot.multiplier * talentMultiplier * comprehensionMultiplier * variance))
+  return Math.max(1, Math.round(realm.cultivationBase * months * player.spiritRoot.cultivationMultiplier * talentMultiplier * comprehensionMultiplier * variance))
 }

@@ -86,7 +86,7 @@ h1, h2, h3, .brand b { font-family: "Noto Serif SC", "Songti SC", serif; }
 .root-card b { font: 13px "Noto Serif SC", serif; color: #d5c8a6; }
 .root-card p { margin: 4px 0 0; font-size: 9px; color: #687169; }
 .stat-list { display: grid; gap: 9px; }
-.stat-list > div { display: grid; grid-template-columns: 32px 22px 1fr; gap: 7px; align-items: center; font-size: 9px; color: var(--muted); }
+.stat-list > div { display: grid; grid-template-columns: 32px 48px 1fr; gap: 7px; align-items: center; font-size: 9px; color: var(--muted); }
 .stat-list b { color: #b9b9ae; font-weight: 500; text-align: right; }
 .stat-list i { height: 2px; background: #0b0e0c; }
 .stat-list em { display: block; height: 100%; background: #607d63; }
@@ -191,6 +191,10 @@ input:focus { border-color: var(--jade); box-shadow: 0 0 0 2px rgba(120,155,123,
 .root-preview strong { font: 14px "Noto Serif SC", serif; color: var(--jade-bright); }
 .root-preview p { margin: 0; color: var(--muted); font-size: 8px; text-align: right; }
 .attribute-builder { display: grid; gap: 9px; }
+.stat-budget-breakdown { display: flex; align-items: center; gap: 9px; margin-bottom: 15px; padding: 10px 12px; border: 1px solid var(--line); background: rgba(120,155,123,.045); color: var(--muted); font-size: 8px; }
+.stat-budget-breakdown span { flex: 1; }
+.stat-budget-breakdown b { float: right; color: var(--gold); font: 13px "Noto Serif SC", serif; }
+.stat-budget-breakdown i { color: #657065; font-style: normal; }
 .attribute-builder > div { display: grid; grid-template-columns: 50px 27px 34px 27px 1fr 55px; gap: 7px; align-items: center; }
 .attribute-builder > div > span { color: #aeb1a7; font: 10px "Noto Serif SC", serif; }
 .attribute-builder button { width: 27px; height: 26px; padding: 0; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }

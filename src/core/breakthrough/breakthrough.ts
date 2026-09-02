@@ -1,11 +1,12 @@
 import { REALMS } from '../../data/realms'
 import type { Player } from '../../models'
+import { getSpiritRootBreakthroughModifier } from '../spiritRoot/spiritRoot'
 
 export interface BreakthroughChance { base: number; spiritRoot: number; comprehension: number; luck: number; talent: number; final: number }
 
 export function calculateBreakthroughChance(player: Player): BreakthroughChance {
   const base = REALMS[player.realmIndex].breakthroughBaseChance
-  const spiritRoot = (player.spiritRoot.rank - 3) * 0.018
+  const spiritRoot = getSpiritRootBreakthroughModifier(player.spiritRoot)
   const comprehension = (player.stats.comprehension - 50) * 0.002
   const luck = (player.stats.luck - 50) * 0.0009
   const talent = player.talents.reduce((sum, entry) => sum + entry.effects.filter((effect) => effect.type === 'breakthroughBonus').reduce((value, effect) => value + effect.value, 0), 0)

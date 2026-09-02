@@ -3,9 +3,9 @@ import { computed } from 'vue'
 import { useGameStore } from '../stores/game'
 const game = useGameStore()
 const progress = computed(() => Math.min(100, (game.player!.cultivation / game.player!.cultivationRequired) * 100))
-const stats = computed<Array<[string, number]>>(() => [
-  ['悟性', game.player!.stats.comprehension], ['气运', game.player!.stats.luck], ['体魄', game.player!.stats.constitution],
-  ['神识', game.player!.stats.soul], ['魅力', game.player!.stats.charm],
+const stats = computed<Array<[string, number, number]>>(() => [
+  ['悟性', game.player!.stats.comprehension, game.player!.statPotential.comprehension], ['气运', game.player!.stats.luck, game.player!.statPotential.luck], ['体魄', game.player!.stats.constitution, game.player!.statPotential.constitution],
+  ['神识', game.player!.stats.soul, game.player!.statPotential.soul], ['魅力', game.player!.stats.charm, game.player!.statPotential.charm],
 ])
 </script>
 
@@ -24,7 +24,7 @@ const stats = computed<Array<[string, number]>>(() => [
       <div><small>灵石</small><strong>{{ game.player!.spiritStones }}</strong><span>枚</span></div>
     </div>
     <div class="root-card"><small>灵根</small><b>{{ game.player!.spiritRoot.name }}</b><p>{{ game.player!.spiritRoot.elements.join(' · ') }} · 修炼倍率 {{ game.player!.spiritRoot.multiplier.toFixed(2) }}</p></div>
-    <div class="stat-list"><div v-for="stat in stats" :key="stat[0]"><span>{{ stat[0] }}</span><b>{{ stat[1] }}</b><i><em :style="{ width: `${Math.min(100, stat[1])}%` }"></em></i></div></div>
+    <div class="stat-list"><div v-for="stat in stats" :key="stat[0]"><span>{{ stat[0] }}</span><b>{{ stat[1] }} / {{ stat[2] }}</b><i><em :style="{ width: `${Math.min(100, stat[1] / stat[2] * 100)}%` }"></em></i></div></div>
     <div class="talent-tags"><span v-for="talent in game.player!.talents" :key="talent.id" :title="talent.description">{{ talent.name }}</span></div>
     <div class="bloodline-note"><small>{{ game.player!.bloodline.familyName }}</small><span>{{ game.player!.bloodline.inheritedTraits.join(' · ') || '凡俗血脉' }}</span></div>
   </aside>

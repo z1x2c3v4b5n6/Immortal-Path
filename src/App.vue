@@ -39,6 +39,6 @@ onMounted(() => game.initialize())
       <section class="view-frame"><RouterView /></section>
       <RecentLogs v-if="game.player" />
     </main>
-    <EventModal v-if="game.pendingEvent" />
+    <EventModal v-if="game.pendingEvent || game.ready.eventResultText" />
   </div>
 </template>

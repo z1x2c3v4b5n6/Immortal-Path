@@ -3,11 +3,13 @@ import { defineStore } from 'pinia'
 import { calculateBreakthroughChance, canBreakthrough } from '../core/breakthrough/breakthrough'
 import { createPlayerFromBuild, generateDescendant } from '../core/creation/creation'
 import { calculateCultivationGain } from '../core/cultivation/cultivation'
+import { selectEventOutcome } from '../core/events/outcomes'
 import { rollLoot } from '../core/loot/loot'
 import { random } from '../core/random/RandomService'
 import { applyFatePurchase, calculateReincarnationPoints, canPurchaseFate, createLifeRecord, defaultSelections, type FatePurchase, initialReincarnation } from '../core/reincarnation/reincarnation'
 import { CURRENT_SAVE_VERSION, migrateSave } from '../core/save/serialization'
 import { SaveService } from '../core/save/SaveService'
+import { modifyStatValue } from '../core/stats/stats'
 import { addMonths } from '../core/time/time'
 import { createWorld, simulateWorld } from '../core/world/world'
 import { eventById, GAME_EVENTS } from '../data/events'
@@ -15,7 +17,7 @@ import { itemById } from '../data/items'
 import { QUALITY_ORDER } from '../data/lootTables'
 import { isMajorBreakthrough, REALMS, realmName } from '../data/realms'
 import { TALENTS } from '../data/talents'
-import type { CharacterBuild, EventEffect, FamilyState, GameSave, InventoryItem, LogEntry, Player, TimelineEvent } from '../models'
+import type { CharacterBuild, EventEffect, FamilyState, GameSave, InventoryItem, LogEntry, Player, StatKey, TimelineEvent } from '../models'
 
 function emptySave(): GameSave {
   const now = new Date().toISOString()
@@ -26,7 +28,7 @@ function emptySave(): GameSave {
   }
 }
 
-function mergeInventory(target: InventoryItem[], source: InventoryItem[]) {
+export function mergeInventory(target: InventoryItem[], source: InventoryItem[]) {
   for (const item of source) {
     const current = target.find((entry) => entry.itemId === item.itemId)
     if (current) current.quantity += item.quantity
@@ -34,9 +36,14 @@ function mergeInventory(target: InventoryItem[], source: InventoryItem[]) {
   }
 }
 
+export function transferInventory(source: InventoryItem[], target: InventoryItem[]) {
+  mergeInventory(target, source.map((item) => ({ ...item })))
+  source.splice(0, source.length)
+}
+
 export const useGameStore = defineStore('game', () => {
   const state = reactive<GameSave>(emptySave())
-  const ready = reactive({ loaded: false, saving: false, lastSaved: '', debugSecret: '' })
+  const ready = reactive({ loaded: false, saving: false, lastSaved: '', debugSecret: '', eventResultTitle: '', eventResultText: '' })
   let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   const player = computed(() => state.player)
@@ -88,12 +95,14 @@ export const useGameStore = defineStore('game', () => {
     const familyId = crypto.randomUUID()
     const familyName = `${(build.name.trim() || '无名').slice(0, 1)}氏`
     const entryType = first ? 'initial' : 'reincarnation'
-    const created = createPlayerFromBuild(build, generation, state.world.currentYear, entryType, familyId, familyName, random, state.reincarnation.selections.carryMemory ? predecessor : undefined)
+    const created = createPlayerFromBuild(build, generation, state.world.currentYear, entryType, familyId, familyName, random, state.reincarnation.selections.statCapBonus, state.reincarnation.selections.carryMemory ? predecessor : undefined)
     state.player = created
     state.world.families.push(createFamily(created))
     state.reincarnation.selections = defaultSelections()
     state.reincarnation.inHall = false
     state.pendingEvent = null
+    ready.eventResultTitle = ''
+    ready.eventResultText = ''
     timeline(`${created.name}生于${created.origin.name}，十六岁踏上寻仙路。`, 'life')
     timeline(`自择${created.spiritRoot.name}，天赋为${created.talents.map((entry) => entry.name).join('、') || '平平无奇'}。`, 'life')
     if (created.originSecret) timeline('身世一栏只留有三个墨字：？？？', 'event')
@@ -104,6 +113,18 @@ export const useGameStore = defineStore('game', () => {
     if (!state.player?.alive) return true
     if (state.player.ageMonths >= state.player.lifespanMonths) { die('寿元耗尽'); return true }
     return false
+  }
+
+  function modifyStat(stat: StatKey, delta: number, reason: string, allowBeyondPotential = false) {
+    const current = state.player
+    if (!current?.alive) return 0
+    const result = modifyStatValue(current.stats, current.statPotential, stat, delta, allowBeyondPotential)
+    if (!result.appliedDelta) return 0
+    current.statHistory.push({ year: state.world.currentYear, month: state.world.currentMonth, stat, delta: result.appliedDelta, reason, exceededPotential: result.exceededPotential })
+    const label = stat === 'comprehension' ? '悟性' : stat === 'luck' ? '气运' : stat === 'constitution' ? '体魄' : stat === 'soul' ? '神识' : '魅力'
+    timeline(`${reason}：${label} ${result.appliedDelta > 0 ? '+' : ''}${result.appliedDelta}。`, 'event')
+    scheduleSave()
+    return result.appliedDelta
   }
 
   function maybeGenerateDescendant(months: number) {
@@ -122,9 +143,15 @@ export const useGameStore = defineStore('game', () => {
 
   function advanceTime(months: number) {
     if (!state.player?.alive) return
+    const ageBefore = Math.floor(state.player.ageMonths / 12)
     simulateWorld(state.world, months, random)
     addMonths(state.world, months)
     state.player.ageMonths += months
+    const ageAfter = Math.floor(state.player.ageMonths / 12)
+    for (let threshold = Math.max(60, Math.floor(ageBefore / 10 + 1) * 10); threshold <= ageAfter; threshold += 10) {
+      modifyStat('constitution', -1, `${threshold}岁时肉身渐衰`)
+      if (threshold % 20 === 0) modifyStat('charm', -1, `${threshold}岁时容颜老去`)
+    }
     maybeGenerateDescendant(months)
     checkDeath()
   }
@@ -164,7 +191,7 @@ export const useGameStore = defineStore('game', () => {
     if (effect.type === 'stones') current.spiritStones = Math.max(0, current.spiritStones + value)
     if (effect.type === 'cultivation') current.cultivation += value
     if (effect.type === 'lifespan') current.lifespanMonths = Math.max(current.ageMonths + 1, current.lifespanMonths + value)
-    if (effect.type === 'stat' && effect.stat) current.stats[effect.stat] += value
+    if (effect.type === 'stat' && effect.stat) { modifyStat(effect.stat, value, effect.text); return }
     if (effect.type === 'item' && effect.itemId) addItem(effect.itemId)
     if (effect.type === 'death') die(effect.text)
     timeline(effect.text, effect.type === 'item' ? 'loot' : 'event')
@@ -175,9 +202,18 @@ export const useGameStore = defineStore('game', () => {
     const option = event?.options.find((entry) => entry.id === optionId)
     if (!event || !option || !state.player) return
     timeline(`奇遇「${event.title}」：${option.label}。`, 'event')
-    for (const effect of option.effects) applyEffect(effect, event.id)
+    const outcome = selectEventOutcome(option.outcomes, state.player, random)
+    for (const effect of outcome.effects) applyEffect(effect, event.id)
+    if (outcome.tags?.includes('rare')) state.reincarnation.rareEventCount++
+    ready.eventResultTitle = event.title
+    ready.eventResultText = outcome.resultText
     state.pendingEvent = null
     scheduleSave()
+  }
+
+  function closeEventResult() {
+    ready.eventResultTitle = ''
+    ready.eventResultText = ''
   }
 
   function adventure() {
@@ -189,7 +225,7 @@ export const useGameStore = defineStore('game', () => {
     addItem(loot.item.id)
     const stones = random.randomInt(6, 20) + state.player.realmIndex * 2
     state.player.spiritStones += stones
-    if (QUALITY_ORDER.indexOf(loot.item.quality) >= 3) state.reincarnation.rareEventCount++
+    if (QUALITY_ORDER.indexOf(loot.item.quality) >= 3) state.reincarnation.rareLootCount++
     timeline(`历练归来，获得${loot.item.quality}「${loot.item.name}」与 ${stones} 枚灵石。`, 'loot')
     if (random.chance(.32)) triggerRandomEvent()
     scheduleSave()
@@ -217,11 +253,14 @@ export const useGameStore = defineStore('game', () => {
         const achievement = `证得${newRealm.group}`
         if (!current.achievements.includes(achievement)) current.achievements.push(achievement)
         unlockAchievements(current)
+        modifyStat('constitution', 2, `突破${newRealm.group}，灵气洗炼肉身`)
+        modifyStat('soul', 1, `突破${newRealm.group}，神魂随境界增长`)
       }
     } else {
       current.cultivation = Math.round(current.cultivation * random.randomInt(65, 88) / 100)
       const lifespanLoss = Math.max(3, current.realmIndex - 6) * random.randomInt(1, 4)
       current.lifespanMonths -= lifespanLoss
+      modifyStat('constitution', -1, '破境失败，道基受损')
       timeline(`破境失败，修为倒退，折损${lifespanLoss}个月寿元。`, 'event')
       if (random.chance(Math.max(0, current.realmIndex - 13) * .009)) die('突破失败，道基崩毁')
     }
@@ -263,12 +302,12 @@ export const useGameStore = defineStore('game', () => {
       id: descendant.id, name: descendant.name, generation: state.lifeRecords.length + 1, birthYear: descendant.birthYear,
       ageMonths: descendant.ageMonths, lifespanMonths: descendant.lifespanMonths, realmIndex: descendant.realmIndex,
       cultivation: descendant.cultivation, cultivationRequired: REALMS[descendant.realmIndex].cultivationRequired,
-      spiritRoot: structuredClone(descendant.spiritRoot), stats: { ...descendant.stats }, spiritStones: descendant.spiritStones + Math.floor((family?.wealth ?? 0) * .5),
+      spiritRoot: structuredClone(descendant.spiritRoot), stats: { ...descendant.stats }, statPotential: { ...descendant.statPotential }, statHistory: [], spiritStones: descendant.spiritStones + Math.floor((family?.wealth ?? 0) * .5),
       inventory: structuredClone(descendant.inventory), talents: structuredClone(descendant.talents), talentPoints: descendant.talents.reduce((sum, talent) => sum + talent.cost, 0),
       origin: descendant.origin, familyId: descendant.familyId, bloodline: family?.bloodline ?? deceased.bloodline,
       entryType: 'bloodline', parentId: deceased.id, predecessorName: deceased.name, alive: true, achievements: [], timeline: [],
     }
-    if (family) { family.wealth = Math.ceil(family.wealth * .5); mergeInventory(state.player.inventory, family.inventory.map((item) => ({ ...item }))) }
+    if (family) { family.wealth = Math.ceil(family.wealth * .5); transferInventory(family.inventory, state.player.inventory) }
     state.reincarnation.inHall = false
     timeline(`${descendant.name}承接${deceased.name}的血脉与遗志，续写家族因果。`, 'life')
     scheduleSave()
@@ -333,8 +372,8 @@ export const useGameStore = defineStore('game', () => {
 
   return {
     state, ready, player, currentRealm, breakthroughChance, pendingEvent, ageYears, remainingYears, eligibleDescendants, isFirstGeneration,
-    initialize, createCharacter, cultivate, adventure, breakthrough, chooseEvent, triggerRandomEvent, continueAsDescendant,
+    initialize, createCharacter, cultivate, adventure, breakthrough, chooseEvent, closeEventResult, triggerRandomEvent, continueAsDescendant,
     enterReincarnationHall, beginReincarnationCreation, purchaseFate, canPurchaseFate: (purchase: FatePurchase) => canPurchaseFate(state.reincarnation, purchase),
-    useItem, manualSave, resetGame, replaceState, debug,
+    modifyStat, useItem, manualSave, resetGame, replaceState, debug,
   }
 })

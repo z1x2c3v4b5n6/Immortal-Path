@@ -8,12 +8,19 @@ export type OriginSecret = '普通弃婴' | '修士遗孤' | '魔修血脉' | '�
 
 export interface Modifier { type: string; value: number; description: string }
 
+export type SpiritElement = '金' | '木' | '水' | '火' | '土' | '雷' | '冰' | '风' | '暗' | '光'
+export type SpiritRootQuality = 'NORMAL' | 'PURE' | 'HEAVENLY'
+
 export interface SpiritRoot {
   id: string
   name: string
-  rank: number
-  multiplier: number
-  elements: string[]
+  elements: SpiritElement[]
+  quality: SpiritRootQuality
+  mutations: SpiritElement[]
+  cultivationMultiplier: number
+  specializationMultiplier: number
+  breakthroughModifier: number
+  statPointBonus: number
 }
 
 export interface TalentEffect {
@@ -44,7 +51,6 @@ export interface OriginDefinition {
   baseStats: PlayerStats
   statCaps: PlayerStats
   freeStatPoints: number
-  talentPoints: number
   startingRealmIndex: number
   startingCultivation: number
   startingSpiritStones: number
@@ -75,6 +81,8 @@ export interface Player {
   cultivationRequired: number
   spiritRoot: SpiritRoot
   stats: PlayerStats
+  statPotential: PlayerStats
+  statHistory: StatChangeRecord[]
   spiritStones: number
   inventory: InventoryItem[]
   talents: TalentInstance[]
@@ -104,6 +112,7 @@ export interface Descendant {
   cultivation: number
   spiritRoot: SpiritRoot
   stats: PlayerStats
+  statPotential: PlayerStats
   talents: TalentInstance[]
   origin: OriginDefinition
   bloodlineTags: string[]
@@ -124,6 +133,15 @@ export interface FamilyState {
   reputation: number
   bloodline: BloodlineState
   memberIds: string[]
+}
+
+export interface StatChangeRecord {
+  year: number
+  month: number
+  stat: StatKey
+  delta: number
+  reason: string
+  exceededPotential: boolean
 }
 
 export interface RealmDefinition {
@@ -185,7 +203,9 @@ export interface ReincarnationSelections {
   extraTalentPoints: number
   statCapBonus: number
   maxTalentQuality: TalentQuality
-  maxRootRank: number
+  canChooseSingleRoot: boolean
+  canChooseMutatedElements: boolean
+  maxRootQuality: SpiritRootQuality
   advancedOriginAccess: boolean
   carryMemory: boolean
 }
@@ -195,6 +215,7 @@ export interface ReincarnationState {
   unlockedTalents: string[]
   unlockedOrigins: string[]
   rareEventCount: number
+  rareLootCount: number
   selections: ReincarnationSelections
   inHall: boolean
 }
@@ -205,7 +226,21 @@ export interface GameSettings { fortunateMode: boolean; autoSave: boolean; logLi
 export type EffectType = 'stones' | 'cultivation' | 'lifespan' | 'stat' | 'item' | 'death'
 export interface EventEffect { type: EffectType; value?: number; stat?: StatKey; itemId?: string; text: string }
 export interface EventRequirement { stat?: StatKey; min?: number; realmIndex?: number }
-export interface EventOption { id: string; label: string; requirement?: EventRequirement; effects: EventEffect[] }
+export type EventOutcomeTag = 'rare' | 'danger' | 'insight'
+export interface EventOutcome {
+  id: string
+  weight: number
+  requirements?: EventRequirement[]
+  effects: EventEffect[]
+  resultText: string
+  tags?: EventOutcomeTag[]
+}
+export interface EventOption {
+  id: string
+  label: string
+  requirement?: EventRequirement
+  outcomes: EventOutcome[]
+}
 export interface GameEvent { id: string; title: string; description: string; weight: number; minRealmIndex?: number; options: EventOption[] }
 
 export interface PendingEvent { eventId: string }
