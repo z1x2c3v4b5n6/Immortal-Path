@@ -5,8 +5,42 @@ export type ItemType = '丹药' | '材料' | '法器' | '特殊' | '传承'
 export type EntryType = 'initial' | 'bloodline' | 'reincarnation'
 export type TalentQuality = '普通' | '优秀' | '稀有' | '极品' | '传说'
 export type OriginSecret = '普通弃婴' | '修士遗孤' | '魔修血脉' | '妖族血脉' | '大能转世' | '古族后裔'
+export type CultivationPathId = 'dao' | 'sword' | 'body' | 'demonic' | 'ghost'
+export type WorldEraId = 'DECLINING' | 'NORMAL' | 'PROSPEROUS' | 'GOLDEN'
+export type WorldStrengthLevel = 'BARREN' | 'COMMON' | 'THRIVING' | 'POWERFUL' | 'SUPREME'
 
 export interface Modifier { type: string; value: number; description: string }
+export interface WorldModifier { type: string; value: number; pathId?: CultivationPathId }
+export interface WorldTrait { id: string; name: string; description: string; modifiers: WorldModifier[]; weight: number; incompatibleWith?: string[] }
+export interface CultivationEnvironment {
+  spiritualQiMultiplier: number
+  yinQiMultiplier: number
+  dangerMultiplier: number
+  resourceMultiplier: number
+  eventFrequencyMultiplier: number
+}
+export interface ContinentState {
+  id: string
+  name: string
+  era: WorldEraId
+  strengthLevel: WorldStrengthLevel
+  traits: WorldTrait[]
+  cultivationEnvironment: CultivationEnvironment
+  pathDistribution: Record<CultivationPathId, number>
+  resourceTendency: string
+}
+
+export interface CultivationPathProgress { pathId: CultivationPathId; experience: number; level: number }
+export interface PathResources {
+  swordIntent: number
+  qiBlood: number
+  maxQiBlood: number
+  bodyStage: number
+  demonicNature: number
+  innerDemon: number
+  karma: number
+  bloodRiteMonthsRemaining: number
+}
 
 export type SpiritElement = '金' | '木' | '水' | '火' | '土' | '雷' | '冰' | '风' | '暗' | '光'
 export type SpiritRootQuality = 'NORMAL' | 'PURE' | 'HEAVENLY'
@@ -98,6 +132,14 @@ export interface Player {
   causeOfDeath?: string
   achievements: string[]
   timeline: TimelineEvent[]
+  primaryPath?: CultivationPathId
+  secondaryPaths: CultivationPathProgress[]
+  pathProgress: CultivationPathProgress[]
+  pathResources: PathResources
+  unlockedPaths: CultivationPathId[]
+  soulStability?: number
+  lifespanFateModifier: number
+  lifespanBonusMonths: number
 }
 
 export interface Descendant {
@@ -147,7 +189,7 @@ export interface StatChangeRecord {
 export interface RealmDefinition {
   id: string
   name: string
-  group: '凡人' | '炼气' | '筑基' | '金丹' | '元婴'
+  group: '凡人' | '炼气' | '筑基' | '金丹' | '元婴' | '化神' | '炼虚' | '合体' | '大乘' | '渡劫'
   cultivationRequired: number
   baseLifespanYears: number
   breakthroughBaseChance: number
@@ -171,6 +213,8 @@ export interface SectState { id: string; name: string; power: number; status: st
 export interface NPC { id: string; name: string; ageMonths: number; lifespanMonths: number; realmIndex: number; alive: boolean; relationship: number }
 
 export interface WorldState {
+  seed: string
+  continent: ContinentState
   currentYear: number
   currentMonth: number
   eraName: string
@@ -197,6 +241,9 @@ export interface LifeRecord {
   parentId?: string
   predecessorName?: string
   familyId: string
+  primaryPath?: CultivationPathId
+  secondaryPaths: CultivationPathProgress[]
+  highestPathLevel: number
 }
 
 export interface ReincarnationSelections {
@@ -223,8 +270,8 @@ export interface ReincarnationState {
 export interface PityState { rollsWithoutRare: number; rollsWithoutEpic: number }
 export interface GameSettings { fortunateMode: boolean; autoSave: boolean; logLimit: number }
 
-export type EffectType = 'stones' | 'cultivation' | 'lifespan' | 'stat' | 'item' | 'death'
-export interface EventEffect { type: EffectType; value?: number; stat?: StatKey; itemId?: string; text: string }
+export type EffectType = 'stones' | 'cultivation' | 'lifespan' | 'stat' | 'item' | 'death' | 'pathResource' | 'pathExperience' | 'unlockPath' | 'soulStability'
+export interface EventEffect { type: EffectType; value?: number; stat?: StatKey; itemId?: string; pathId?: CultivationPathId; resource?: keyof PathResources; text: string }
 export interface EventRequirement { stat?: StatKey; min?: number; realmIndex?: number }
 export type EventOutcomeTag = 'rare' | 'danger' | 'insight'
 export interface EventOutcome {
@@ -241,7 +288,7 @@ export interface EventOption {
   requirement?: EventRequirement
   outcomes: EventOutcome[]
 }
-export interface GameEvent { id: string; title: string; description: string; weight: number; minRealmIndex?: number; options: EventOption[] }
+export interface GameEvent { id: string; title: string; description: string; weight: number; minRealmIndex?: number; pathRequirements?: CultivationPathId[]; pathWeights?: Partial<Record<CultivationPathId, number>>; options: EventOption[] }
 
 export interface PendingEvent { eventId: string }
 export interface CharacterBuild {

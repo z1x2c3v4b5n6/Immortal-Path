@@ -4,20 +4,24 @@ import { calculateBreakthroughChance, canBreakthrough } from '../core/breakthrou
 import { createPlayerFromBuild, generateDescendant } from '../core/creation/creation'
 import { calculateCultivationGain } from '../core/cultivation/cultivation'
 import { selectEventOutcome } from '../core/events/outcomes'
+import { agingStage, calculateMaxLifespanMonths, isNaturalLifespanExpired, isSoulDispersed } from '../core/lifespan/lifespan'
 import { rollLoot } from '../core/loot/loot'
+import { addPathExperience, addSecondaryPath, applyPathTraining, burnLifespanForCultivation, choosePrimaryPath as choosePath, initialPathResources, pathProgress } from '../core/paths/paths'
 import { random } from '../core/random/RandomService'
 import { applyFatePurchase, calculateReincarnationPoints, canPurchaseFate, createLifeRecord, defaultSelections, type FatePurchase, initialReincarnation } from '../core/reincarnation/reincarnation'
 import { CURRENT_SAVE_VERSION, migrateSave } from '../core/save/serialization'
 import { SaveService } from '../core/save/SaveService'
 import { modifyStatValue } from '../core/stats/stats'
 import { addMonths } from '../core/time/time'
-import { createWorld, simulateWorld } from '../core/world/world'
+import { createWorld, generateContinent, getWorldModifier, simulateWorld } from '../core/world/world'
 import { eventById, GAME_EVENTS } from '../data/events'
 import { itemById } from '../data/items'
 import { QUALITY_ORDER } from '../data/lootTables'
 import { isMajorBreakthrough, REALMS, realmName } from '../data/realms'
 import { TALENTS } from '../data/talents'
-import type { CharacterBuild, EventEffect, FamilyState, GameSave, InventoryItem, LogEntry, Player, StatKey, TimelineEvent } from '../models'
+import { CULTIVATION_PATHS } from '../data/cultivationPaths'
+import { WORLD_TRAITS } from '../data/worldTraits'
+import type { CharacterBuild, CultivationPathId, EventEffect, FamilyState, GameSave, InventoryItem, LogEntry, Player, StatKey, TimelineEvent, WorldEraId, WorldStrengthLevel } from '../models'
 
 function emptySave(): GameSave {
   const now = new Date().toISOString()
@@ -48,10 +52,12 @@ export const useGameStore = defineStore('game', () => {
 
   const player = computed(() => state.player)
   const currentRealm = computed(() => state.player ? REALMS[state.player.realmIndex] : REALMS[0])
-  const breakthroughChance = computed(() => state.player ? calculateBreakthroughChance(state.player) : null)
+  const breakthroughChance = computed(() => state.player ? calculateBreakthroughChance(state.player, state.world) : null)
   const pendingEvent = computed(() => state.pendingEvent ? eventById(state.pendingEvent.eventId) : undefined)
   const ageYears = computed(() => Math.floor((state.player?.ageMonths ?? 0) / 12))
   const remainingYears = computed(() => Math.max(0, Math.ceil(((state.player?.lifespanMonths ?? 0) - (state.player?.ageMonths ?? 0)) / 12)))
+  const agingStatus = computed(() => state.player ? agingStage(state.player) : '壮年')
+  const canBecomeGhost = computed(() => Boolean(state.player && !state.player.alive && state.player.primaryPath !== 'ghost'))
   const eligibleDescendants = computed(() => state.world.descendants.filter((descendant) => descendant.alive && !descendant.isPlayer && descendant.ageMonths >= 16 * 12 && descendant.parents.includes(state.player?.id ?? '')))
   const isFirstGeneration = computed(() => state.lifeRecords.length === 0)
 
@@ -109,9 +115,18 @@ export const useGameStore = defineStore('game', () => {
     scheduleSave()
   }
 
+  function regenerateWorld(seed?: string) {
+    if (state.player || state.lifeRecords.length) return false
+    const replacement = createWorld(seed)
+    state.world = replacement
+    scheduleSave()
+    return true
+  }
+
   function checkDeath() {
     if (!state.player?.alive) return true
-    if (state.player.ageMonths >= state.player.lifespanMonths) { die('寿元耗尽'); return true }
+    if (isSoulDispersed(state.player)) { die('魂体稳定耗尽，魂飞魄散'); return true }
+    if (isNaturalLifespanExpired(state.player)) { die('寿元耗尽'); return true }
     return false
   }
 
@@ -148,32 +163,45 @@ export const useGameStore = defineStore('game', () => {
     addMonths(state.world, months)
     state.player.ageMonths += months
     const ageAfter = Math.floor(state.player.ageMonths / 12)
-    for (let threshold = Math.max(60, Math.floor(ageBefore / 10 + 1) * 10); threshold <= ageAfter; threshold += 10) {
-      modifyStat('constitution', -1, `${threshold}岁时肉身渐衰`)
-      if (threshold % 20 === 0) modifyStat('charm', -1, `${threshold}岁时容颜老去`)
+    if (state.player.primaryPath === 'ghost') {
+      state.player.soulStability = Math.max(0, (state.player.soulStability ?? 80) - months / 18)
+    } else {
+      for (let threshold = Math.max(60, Math.floor(ageBefore / 10 + 1) * 10); threshold <= ageAfter; threshold += 10) {
+        modifyStat('constitution', agingStage(state.player) === '暮年' ? -2 : -1, `${threshold}岁时肉身渐衰`)
+        if (threshold % 20 === 0) modifyStat('charm', -1, `${threshold}岁时容颜老去`)
+      }
     }
+    state.player.pathResources.bloodRiteMonthsRemaining = Math.max(0, state.player.pathResources.bloodRiteMonthsRemaining - months)
     maybeGenerateDescendant(months)
     checkDeath()
   }
 
   function cultivate(months: number) {
     if (!state.player?.alive || state.pendingEvent) return
-    const gain = calculateCultivationGain(state.player, months)
+    const gain = calculateCultivationGain(state.player, months, state.world)
     state.player.cultivation += gain
+    const pathResult = applyPathTraining(state.player, months, state.world)
+    if (pathResult.statGrowth?.constitution) modifyStat('constitution', pathResult.statGrowth.constitution, '炼体淬炼肉身')
+    if (pathResult.statGrowth?.soul) modifyStat('soul', pathResult.statGrowth.soul, '鬼道温养神魂')
     advanceTime(months)
     if (!state.player.alive) return
-    timeline(`${months >= 36 ? '闭关' : '修炼'}${months}个月，修为 +${gain.toLocaleString()}。`, 'life')
+    timeline(`${months >= 36 ? '闭关' : '修炼'}${months}个月，修为 +${gain.toLocaleString()}${pathResult.resourceText ? `，${pathResult.resourceText}` : ''}。`, 'life')
     const talentEventBonus = state.player.talents.flatMap((talent) => talent.effects).filter((effect) => effect.type === 'eventWeight').reduce((sum, effect) => sum + effect.value, 0)
     const originBonus = state.player.origin.modifiers.filter((modifier) => modifier.type === 'hiddenEvent').reduce((sum, modifier) => sum + modifier.value, 0)
-    const eventChance = Math.min(.9, .16 + Math.log2(months + 1) * .12 + talentEventBonus + originBonus * .1)
+    const eventChance = Math.min(.92, (.16 + Math.log2(months + 1) * .12 + talentEventBonus + originBonus * .1) * state.world.continent.cultivationEnvironment.eventFrequencyMultiplier)
     if (random.chance(eventChance)) triggerRandomEvent()
     scheduleSave()
   }
 
   function triggerRandomEvent() {
     if (!state.player?.alive || state.pendingEvent) return
-    const eligible = GAME_EVENTS.filter((event) => (event.minRealmIndex ?? 0) <= state.player!.realmIndex)
-    const chosen = random.weightedRandom(eligible.map((event) => ({ value: event, weight: event.weight })))
+    const eligible = GAME_EVENTS.filter((event) => (event.minRealmIndex ?? 0) <= state.player!.realmIndex && (!event.pathRequirements?.length || event.pathRequirements.includes(state.player!.primaryPath!)))
+    const chosen = random.weightedRandom(eligible.map((event) => {
+      const pathId = state.player!.primaryPath
+      const pathWeight = pathId ? event.pathWeights?.[pathId] ?? 1 : 1
+      const worldPathEvent = pathId ? getWorldModifier(state.world, 'pathEvent', pathId) : 0
+      return { value: event, weight: event.weight * pathWeight * (1 + worldPathEvent) }
+    }))
     state.pendingEvent = { eventId: chosen.id }
     scheduleSave()
   }
@@ -190,11 +218,52 @@ export const useGameStore = defineStore('game', () => {
     if (eventId === 'market' && effect.type === 'stones') value = Math.round(value * (1 + current.origin.modifiers.filter((modifier) => modifier.type === 'marketReward').reduce((sum, modifier) => sum + modifier.value, 0)))
     if (effect.type === 'stones') current.spiritStones = Math.max(0, current.spiritStones + value)
     if (effect.type === 'cultivation') current.cultivation += value
-    if (effect.type === 'lifespan') current.lifespanMonths = Math.max(current.ageMonths + 1, current.lifespanMonths + value)
+    if (effect.type === 'lifespan') { current.lifespanBonusMonths += value; current.lifespanMonths = calculateMaxLifespanMonths(current) }
     if (effect.type === 'stat' && effect.stat) { modifyStat(effect.stat, value, effect.text); return }
     if (effect.type === 'item' && effect.itemId) addItem(effect.itemId)
+    if (effect.type === 'pathExperience' && effect.pathId) addPathExperience(current, effect.pathId, value, current.primaryPath !== effect.pathId)
+    if (effect.type === 'pathResource' && effect.resource) {
+      current.pathResources[effect.resource] = Math.max(0, current.pathResources[effect.resource] + value)
+      if (effect.resource === 'qiBlood') current.pathResources.qiBlood = Math.min(current.pathResources.maxQiBlood, current.pathResources.qiBlood)
+    }
+    if (effect.type === 'unlockPath' && effect.pathId && !current.unlockedPaths.includes(effect.pathId)) current.unlockedPaths.push(effect.pathId)
+    if (effect.type === 'soulStability') current.soulStability = Math.max(0, Math.min(100, (current.soulStability ?? 0) + value))
     if (effect.type === 'death') die(effect.text)
     timeline(effect.text, effect.type === 'item' ? 'loot' : 'event')
+  }
+
+  function selectPrimaryPath(pathId: CultivationPathId) {
+    const current = state.player
+    if (!current || !choosePath(current, pathId)) return false
+    timeline(`${current.name}立下道心，以${CULTIVATION_PATHS.find((path) => path.id === pathId)?.name}为此世主道。`, 'realm')
+    current.lifespanMonths = calculateMaxLifespanMonths(current)
+    scheduleSave()
+    return true
+  }
+
+  function selectSecondaryPath(pathId: CultivationPathId) {
+    if (!state.player || !addSecondaryPath(state.player, pathId)) return false
+    timeline(`兼修${CULTIVATION_PATHS.find((path) => path.id === pathId)?.name}，副道所得有所折减。`, 'realm')
+    scheduleSave()
+    return true
+  }
+
+  function pathPractice() {
+    const current = state.player
+    if (!current?.alive || !current.primaryPath) return
+    const result = applyPathTraining(current, 3, state.world)
+    if (result.statGrowth?.constitution) modifyStat('constitution', result.statGrowth.constitution, '专修肉身')
+    if (result.statGrowth?.soul) modifyStat('soul', result.statGrowth.soul, '温养魂体')
+    advanceTime(3)
+    if (current.alive) timeline(`专修${CULTIVATION_PATHS.find((path) => path.id === current.primaryPath)?.name}三月，${result.resourceText || `道途经验 +${result.experience}`}。`, 'life')
+    scheduleSave()
+  }
+
+  function bloodRite() {
+    if (!state.player || !burnLifespanForCultivation(state.player)) return false
+    timeline('施展血炼术，以五年寿元换取未来十年的修炼加速，心魔与业力随之增长。', 'event')
+    scheduleSave()
+    return true
   }
 
   function chooseEvent(optionId: string) {
@@ -239,27 +308,34 @@ export const useGameStore = defineStore('game', () => {
   function breakthrough() {
     const current = state.player
     if (!current || !canBreakthrough(current)) return
-    const chance = calculateBreakthroughChance(current).final
+    const chance = calculateBreakthroughChance(current, state.world).final
     advanceTime(1)
     if (!current.alive) return
     if (random.chance(chance)) {
+      const lifespanBefore = current.lifespanMonths
       current.realmIndex++
       current.cultivation = Math.max(0, current.cultivation - current.cultivationRequired)
       current.cultivationRequired = REALMS[current.realmIndex].cultivationRequired
       const newRealm = REALMS[current.realmIndex]
-      current.lifespanMonths = Math.max(current.lifespanMonths, newRealm.baseLifespanYears * 12 + Math.max(0, current.stats.constitution - 50) * 2)
       timeline(`破境成功，踏入${newRealm.name}！`, 'realm')
       if (isMajorBreakthrough(current.realmIndex)) {
+        current.lifespanMonths = calculateMaxLifespanMonths(current)
         const achievement = `证得${newRealm.group}`
         if (!current.achievements.includes(achievement)) current.achievements.push(achievement)
         unlockAchievements(current)
         modifyStat('constitution', 2, `突破${newRealm.group}，灵气洗炼肉身`)
         modifyStat('soul', 1, `突破${newRealm.group}，神魂随境界增长`)
+        timeline(`肉身得到灵气滋养，生机重新焕发。寿元上限：${Math.floor(lifespanBefore / 12)} → ${Math.floor(current.lifespanMonths / 12)} 年。`, 'realm')
       }
     } else {
       current.cultivation = Math.round(current.cultivation * random.randomInt(65, 88) / 100)
-      const lifespanLoss = Math.max(3, current.realmIndex - 6) * random.randomInt(1, 4)
-      current.lifespanMonths -= lifespanLoss
+      const baseLoss = Math.max(3, current.realmIndex - 6) * random.randomInt(1, 4)
+      const bodyResistance = current.primaryPath === 'body' ? .7 : 1
+      const demonicRisk = current.primaryPath === 'demonic' ? 1.6 : 1
+      const lifespanLoss = Math.round(baseLoss * bodyResistance * demonicRisk)
+      current.lifespanBonusMonths -= lifespanLoss
+      current.lifespanMonths = calculateMaxLifespanMonths(current)
+      if (current.primaryPath === 'demonic') current.pathResources.innerDemon = Math.min(100, current.pathResources.innerDemon + 10)
       modifyStat('constitution', -1, '破境失败，道基受损')
       timeline(`破境失败，修为倒退，折损${lifespanLoss}个月寿元。`, 'event')
       if (random.chance(Math.max(0, current.realmIndex - 13) * .009)) die('突破失败，道基崩毁')
@@ -292,6 +368,29 @@ export const useGameStore = defineStore('game', () => {
     void manualSave()
   }
 
+  function becomeGhost() {
+    const current = state.player
+    if (!current || current.alive || current.primaryPath === 'ghost') return false
+    const recordIndex = state.lifeRecords.findIndex((record) => record.playerId === current.id)
+    if (recordIndex >= 0) {
+      state.reincarnation.totalPoints = Math.max(0, state.reincarnation.totalPoints - state.lifeRecords[recordIndex].pointsEarned)
+      state.lifeRecords.splice(recordIndex, 1)
+    }
+    current.alive = true
+    current.causeOfDeath = undefined
+    current.unlockedPaths = [...new Set([...current.unlockedPaths, 'ghost'])]
+    if (current.primaryPath && !current.secondaryPaths.some((entry) => entry.pathId === current.primaryPath)) {
+      const previous = current.pathProgress.find((entry) => entry.pathId === current.primaryPath)
+      if (previous) current.secondaryPaths = [{ ...previous }]
+    }
+    current.primaryPath = 'ghost'
+    current.soulStability = 80
+    pathProgress(current, 'ghost')
+    timeline('肉身虽死，魂魄却拒绝轮回。你以残魂踏上鬼道，往后以魂体稳定维系存在。', 'realm')
+    scheduleSave()
+    return true
+  }
+
   function continueAsDescendant(id: string) {
     const deceased = state.player
     const descendant = eligibleDescendants.value.find((entry) => entry.id === id)
@@ -306,7 +405,10 @@ export const useGameStore = defineStore('game', () => {
       inventory: structuredClone(descendant.inventory), talents: structuredClone(descendant.talents), talentPoints: descendant.talents.reduce((sum, talent) => sum + talent.cost, 0),
       origin: descendant.origin, familyId: descendant.familyId, bloodline: family?.bloodline ?? deceased.bloodline,
       entryType: 'bloodline', parentId: deceased.id, predecessorName: deceased.name, alive: true, achievements: [], timeline: [],
+      secondaryPaths: [], pathProgress: [], pathResources: initialPathResources(), unlockedPaths: ['dao', 'sword', 'body'],
+      lifespanFateModifier: 0, lifespanBonusMonths: 0,
     }
+    state.player.lifespanMonths = calculateMaxLifespanMonths(state.player)
     if (family) { family.wealth = Math.ceil(family.wealth * .5); transferInventory(family.inventory, state.player.inventory) }
     state.reincarnation.inHall = false
     timeline(`${descendant.name}承接${deceased.name}的血脉与遗志，续写家族因果。`, 'life')
@@ -351,7 +453,7 @@ export const useGameStore = defineStore('game', () => {
 
   async function resetGame() { await SaveService.remove(); replaceState(emptySave()) }
 
-  type DebugAction = 'cultivation' | 'stones' | 'age' | 'event' | 'death' | 'points' | 'unlockTalents' | 'descendant' | 'adultDescendants' | 'secret' | 'toggleGeneration' | 'hall'
+  type DebugAction = 'cultivation' | 'stones' | 'age' | 'age80' | 'age90' | 'age99' | 'event' | 'death' | 'points' | 'unlockTalents' | 'descendant' | 'adultDescendants' | 'secret' | 'toggleGeneration' | 'hall' | 'pathDao' | 'pathSword' | 'pathBody' | 'pathDemonic' | 'pathGhost' | 'pathExperience' | 'swordIntent' | 'qiBlood' | 'demonicNature' | 'innerDemon' | 'karma' | 'soulStability' | 'majorLifespan'
   function debug(action: DebugAction) {
     if (action === 'points') state.reincarnation.totalPoints += 500
     if (action === 'unlockTalents') state.reincarnation.unlockedTalents = TALENTS.map((talent) => talent.id)
@@ -360,6 +462,9 @@ export const useGameStore = defineStore('game', () => {
     if (action === 'cultivation') current.cultivation += Math.max(1000, current.cultivationRequired)
     if (action === 'stones') current.spiritStones += 1000
     if (action === 'age') { current.ageMonths = Math.max(current.ageMonths, current.lifespanMonths - 12); timeline('岁月忽然加速，你已至寿元将尽之时。') }
+    if (action === 'age80') current.ageMonths = Math.floor(current.lifespanMonths * .8)
+    if (action === 'age90') current.ageMonths = Math.floor(current.lifespanMonths * .9)
+    if (action === 'age99') current.ageMonths = Math.floor(current.lifespanMonths * .99)
     if (action === 'event') triggerRandomEvent()
     if (action === 'descendant') { const child = generateDescendant(current, state.world.currentYear, random); state.world.descendants.push(child); state.world.families.find((family) => family.id === current.familyId)?.memberIds.push(child.id) }
     if (action === 'adultDescendants') state.world.descendants.filter((descendant) => descendant.parents.includes(current.id)).forEach((descendant) => { descendant.ageMonths = Math.max(descendant.ageMonths, 18 * 12) })
@@ -367,13 +472,41 @@ export const useGameStore = defineStore('game', () => {
     if (action === 'toggleGeneration') { current.generation = current.generation === 1 ? 2 : 1; current.entryType = current.generation === 1 ? 'initial' : 'reincarnation' }
     if (action === 'death') die('调试天劫降临')
     if (action === 'hall') { if (current.alive) die('调试轮回召引'); enterReincarnationHall() }
+    const debugPath = action === 'pathDao' ? 'dao' : action === 'pathSword' ? 'sword' : action === 'pathBody' ? 'body' : action === 'pathDemonic' ? 'demonic' : action === 'pathGhost' ? 'ghost' : undefined
+    if (debugPath) { current.primaryPath = undefined; current.unlockedPaths = [...new Set([...current.unlockedPaths, debugPath])]; choosePath(current, debugPath, true); if (debugPath === 'ghost') current.soulStability = 80 }
+    if (action === 'pathExperience' && current.primaryPath) addPathExperience(current, current.primaryPath, 500)
+    if (action === 'swordIntent') current.pathResources.swordIntent += 100
+    if (action === 'qiBlood') { current.pathResources.maxQiBlood += 100; current.pathResources.qiBlood = current.pathResources.maxQiBlood }
+    if (action === 'demonicNature') current.pathResources.demonicNature = Math.min(100, current.pathResources.demonicNature + 20)
+    if (action === 'innerDemon') current.pathResources.innerDemon = Math.min(100, current.pathResources.innerDemon + 20)
+    if (action === 'karma') current.pathResources.karma = Math.min(100, current.pathResources.karma + 20)
+    if (action === 'soulStability') current.soulStability = Math.min(100, (current.soulStability ?? 0) + 20)
+    if (action === 'majorLifespan') { current.realmIndex = Math.min(REALMS.length - 1, current.realmIndex < 11 ? 11 : current.realmIndex + (4 - (current.realmIndex - 11) % 4)); current.lifespanMonths = calculateMaxLifespanMonths(current) }
+    scheduleSave()
+  }
+
+  function debugWorld(action: 'regenerate' | 'addTrait' | 'removeTrait' | 'era' | 'strength') {
+    if (action === 'regenerate') { state.world.seed = createWorld().seed; state.world.continent = generateContinent(state.world.seed) }
+    if (action === 'addTrait') {
+      const candidate = WORLD_TRAITS.find((trait) => !state.world.continent.traits.some((entry) => entry.id === trait.id))
+      if (candidate) state.world.continent.traits.push(structuredClone(candidate))
+    }
+    if (action === 'removeTrait') state.world.continent.traits.pop()
+    if (action === 'era') {
+      const eras: WorldEraId[] = ['DECLINING', 'NORMAL', 'PROSPEROUS', 'GOLDEN']
+      state.world.continent.era = eras[(eras.indexOf(state.world.continent.era) + 1) % eras.length]
+    }
+    if (action === 'strength') {
+      const strengths: WorldStrengthLevel[] = ['BARREN', 'COMMON', 'THRIVING', 'POWERFUL', 'SUPREME']
+      state.world.continent.strengthLevel = strengths[(strengths.indexOf(state.world.continent.strengthLevel) + 1) % strengths.length]
+    }
     scheduleSave()
   }
 
   return {
-    state, ready, player, currentRealm, breakthroughChance, pendingEvent, ageYears, remainingYears, eligibleDescendants, isFirstGeneration,
+    state, ready, player, currentRealm, breakthroughChance, pendingEvent, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration,
     initialize, createCharacter, cultivate, adventure, breakthrough, chooseEvent, closeEventResult, triggerRandomEvent, continueAsDescendant,
     enterReincarnationHall, beginReincarnationCreation, purchaseFate, canPurchaseFate: (purchase: FatePurchase) => canPurchaseFate(state.reincarnation, purchase),
-    modifyStat, useItem, manualSave, resetGame, replaceState, debug,
+    modifyStat, selectPrimaryPath, selectSecondaryPath, pathPractice, bloodRite, becomeGhost, regenerateWorld, debugWorld, useItem, manualSave, resetGame, replaceState, debug,
   }
 })

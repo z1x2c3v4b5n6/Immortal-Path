@@ -4,11 +4,28 @@ import { instantiateTalent, TALENTS, talentById } from '../../data/talents'
 import type { CharacterBuild, Descendant, EntryType, OriginDefinition, OriginSecret, Player, PlayerStats, ReincarnationState, SpiritElement, SpiritRoot, SpiritRootQuality, StatKey, TalentDefinition, TalentQuality } from '../../models'
 import type { RandomService } from '../random/RandomService'
 import { REALMS } from '../../data/realms'
+import { initialPathResources } from '../paths/paths'
+import { calculateMaxLifespanMonths } from '../lifespan/lifespan'
 
 export const STAT_KEYS: StatKey[] = ['comprehension', 'luck', 'constitution', 'soul', 'charm']
 export const STAT_LABELS: Record<StatKey, string> = { comprehension: '悟性', luck: '气运', constitution: '体魄', soul: '神识', charm: '魅力' }
 export const TALENT_QUALITY_ORDER: TalentQuality[] = ['普通', '优秀', '稀有', '极品', '传说']
 const secrets: OriginSecret[] = ['普通弃婴', '修士遗孤', '魔修血脉', '妖族血脉', '大能转世', '古族后裔']
+
+export interface ManualRootPolicy { counts: number[]; elements: SpiritElement[]; qualities: SpiritRootQuality[] }
+export function manualRootPolicy(firstGeneration: boolean, reincarnation: ReincarnationState): ManualRootPolicy {
+  const qualityOrder: SpiritRootQuality[] = ['NORMAL', 'PURE', 'HEAVENLY']
+  const maxQualityIndex = qualityOrder.indexOf(reincarnation.selections.maxRootQuality)
+  return {
+    counts: reincarnation.selections.canChooseSingleRoot && !firstGeneration ? [5, 4, 3, 2, 1] : [5, 4, 3, 2],
+    elements: !firstGeneration && reincarnation.selections.canChooseMutatedElements ? [...STANDARD_ELEMENTS, ...MUTATED_ELEMENTS] : [...STANDARD_ELEMENTS],
+    qualities: firstGeneration ? ['NORMAL'] : qualityOrder.slice(0, maxQualityIndex + 1),
+  }
+}
+
+export function isManualSpiritRootAllowed(root: SpiritRoot, policy: ManualRootPolicy): boolean {
+  return policy.counts.includes(root.elements.length) && root.elements.every((element) => policy.elements.includes(element)) && policy.qualities.includes(root.quality)
+}
 
 export function allocateStat(stats: PlayerStats, key: StatKey, delta: number, origin: OriginDefinition, capBonus: number, remaining: number) {
   const floor = origin.baseStats[key]
@@ -81,7 +98,7 @@ export function randomTalentIds(budget: number, pool: TalentDefinition[], rng: R
   return result
 }
 
-export function validateBuild(build: CharacterBuild, origin: OriginDefinition, capBonus: number, talentPool: TalentDefinition[]) {
+export function validateBuild(build: CharacterBuild, origin: OriginDefinition, capBonus: number, talentPool: TalentDefinition[], rootPolicy?: ManualRootPolicy) {
   const spentStats = STAT_KEYS.reduce((sum, key) => sum + build.stats[key] - origin.baseStats[key], 0)
   if (spentStats !== totalFreeStatPoints(origin, build.spiritRoot)) return '请分配完全部属性点。'
   if (STAT_KEYS.some((key) => build.stats[key] < origin.baseStats[key] || build.stats[key] > origin.statCaps[key] + capBonus)) return '属性超出了当前出身的合法范围。'
@@ -90,6 +107,7 @@ export function validateBuild(build: CharacterBuild, origin: OriginDefinition, c
   if (picked.reduce((sum, talent) => sum + talent.cost, 0) > build.talentBudget) return '天赋点不足。'
   if (!build.spiritRoot || build.spiritRoot.elements.length < 1 || build.spiritRoot.elements.length > 5) return '请选择灵根。'
   if (new Set(build.spiritRoot.elements).size !== build.spiritRoot.elements.length) return '灵根元素不可重复。'
+  if (!build.randomRoot && rootPolicy && !isManualSpiritRootAllowed(build.spiritRoot, rootPolicy)) return '当前轮回权限无法手动选择此灵根。'
   return ''
 }
 
@@ -113,15 +131,21 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
   if (build.randomRoot) finalStats.luck += SPIRIT_ROOT_CONFIG.randomLuckBonus
   const lifespanMultiplier = 1 + talents.flatMap((talent) => talent.effects).filter((effect) => effect.type === 'lifespanMultiplier').reduce((sum, effect) => sum + effect.value, 0)
   const realm = REALMS[origin.startingRealmIndex]
-  return {
+  const player: Player = {
     id: crypto.randomUUID(), name: build.name.trim() || rng.pick(['沈砚', '林昭', '顾长风', '苏问雪', '江照夜', '叶知秋']), generation,
-    birthYear: worldYear - 16, ageMonths: 192, lifespanMonths: Math.round((realm.baseLifespanYears * 12 + Math.max(0, finalStats.constitution - 50) * 2) * lifespanMultiplier),
+    birthYear: worldYear - 16, ageMonths: 192, lifespanMonths: 1,
     realmIndex: origin.startingRealmIndex, cultivation: origin.startingCultivation, cultivationRequired: realm.cultivationRequired,
     spiritRoot: structuredClone(build.spiritRoot), stats: finalStats, statPotential: createStatPotential(origin, potentialBonus, rng, finalStats, build.spiritRoot), statHistory: [], spiritStones: origin.startingSpiritStones, inventory: [],
     talents: talents.map((talent) => instantiateTalent(talent, generation)), talentPoints: build.talentBudget, origin, originSecret: origin.id === 'mystery' ? rng.pick(secrets) : undefined,
     familyId, bloodline: { familyId, familyName, bloodlineLevel: entryType === 'initial' ? 1 : 0, inheritedTraits: origin.tags.filter((tag) => tag.includes('血脉')) },
     entryType, predecessorName, alive: true, achievements: [], timeline: [],
+    secondaryPaths: [], pathProgress: [], pathResources: initialPathResources(), unlockedPaths: ['dao', 'sword', 'body'],
+    lifespanFateModifier: rng.randomInt(-100, 100) / 1000, lifespanBonusMonths: 0,
   }
+  // 旧天赋倍率已由统一寿元函数读取；保留局部变量只为避免旧创建逻辑遗漏。
+  void lifespanMultiplier
+  player.lifespanMonths = calculateMaxLifespanMonths(player)
+  return player
 }
 
 export function selectableOrigins(firstGeneration: boolean, reincarnation: ReincarnationState) {
@@ -134,6 +158,8 @@ export function generateDescendant(parent: Player, worldYear: number, rng: Rando
   const inheritedPotential = Object.fromEntries(STAT_KEYS.map((key) => [key, Math.max(inheritedStats[key], Math.round(parent.statPotential[key] * .72 + 15 + fluctuation()))])) as PlayerStats
   const inheritedRootLuck = (parent.spiritRoot.quality === 'HEAVENLY' ? 12 : parent.spiritRoot.quality === 'PURE' ? 6 : 0) + parent.spiritRoot.mutations.length * 4
   const spiritRoot = randomSpiritRoot(rng, inheritedRootLuck)
+  const rootPotential = spiritRootPotentialModifiers(spiritRoot)
+  for (const key of STAT_KEYS) inheritedPotential[key] = Math.max(inheritedStats[key], inheritedPotential[key] + (rootPotential[key] ?? 0))
   const inheritedTalents = parent.talents.filter(() => rng.chance(.18)).slice(0, 2).map((talent) => ({ ...talent, acquiredGeneration: parent.generation + 1 }))
   const surname = parent.name.slice(0, 1)
   const name = `${surname}${rng.pick(['清河', '念安', '望舒', '知微', '云岫', '景行', '明夷', '若木'])}`

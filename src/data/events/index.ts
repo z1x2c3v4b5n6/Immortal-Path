@@ -1,4 +1,5 @@
 import type { EventEffect, GameEvent } from '../../models'
+import { PATH_EVENTS } from './pathEvents'
 
 type EventSeed = [string, string, string, string, EventEffect[], string, EventEffect[]]
 
@@ -35,11 +36,11 @@ const seeds: EventSeed[] = [
   ['wander', '故地重游', '你经过一座似曾相识的小镇，旧事如潮。', '寻访旧迹', [{ type: 'stat', stat: 'soul', value: 2, text: '岁月令神魂更加沉静。' }], '买酒听书', [{ type: 'stones', value: 16, text: '说书人讲的竟是前朝秘闻。' }]],
 ]
 
-export const GAME_EVENTS: GameEvent[] = seeds.map(([id, title, description, a, aEffects, b, bEffects], index) => ({
+const BASE_EVENTS: GameEvent[] = seeds.map(([id, title, description, a, aEffects, b, bEffects], index) => ({
   id, title, description, weight: index > 26 ? 3 : 8 + (index % 4), minRealmIndex: index > 26 ? 8 : undefined,
   options: [
     { id: 'a', label: a, outcomes: [
-      { id: 'success', weight: 78, effects: aEffects, resultText: aEffects.map((effect) => effect.text).join(' '), tags: id === 'bandits' || id === 'cave' ? ['danger', 'rare'] : aEffects.some((effect) => effect.type === 'item') ? ['rare'] : ['insight'] },
+      { id: 'success', weight: 78, effects: aEffects, resultText: aEffects.map((effect) => effect.text).join(' '), tags: id === 'bandits' || id === 'cave' || aEffects.some((effect) => effect.type === 'item') ? ['rare'] : ['insight'] },
       { id: 'setback', weight: 22, effects: id === 'bandits' ? [{ type: 'stat', stat: 'constitution', value: -2, text: '恶战留下伤势，体魄受损。' }] : [], resultText: id === 'bandits' ? '你虽脱身，却在恶战中负伤。' : '机缘稍纵即逝，此番未能有所收获。', tags: id === 'bandits' || id === 'cave' ? ['danger'] : undefined },
     ] },
     { id: 'b', label: b, outcomes: [
@@ -49,5 +50,7 @@ export const GAME_EVENTS: GameEvent[] = seeds.map(([id, title, description, a, a
     { id: 'leave', label: '谨慎离开', outcomes: [{ id: 'leave', weight: 1, effects: [{ type: 'cultivation', value: 30, text: '你守住本心，继续前行。' }], resultText: '你守住本心，继续前行。' }] },
   ],
 }))
+
+export const GAME_EVENTS: GameEvent[] = [...BASE_EVENTS, ...PATH_EVENTS]
 
 export const eventById = (id: string) => GAME_EVENTS.find((event) => event.id === id)

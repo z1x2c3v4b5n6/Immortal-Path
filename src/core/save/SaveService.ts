@@ -9,6 +9,8 @@ class GameDatabase extends Dexie {
     this.version(1).stores({ saves: 'id,updatedAt' })
     this.version(2).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
     this.version(3).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(4).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(5).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
   }
 }
 
@@ -16,7 +18,7 @@ const db = new GameDatabase()
 
 export const SaveService = {
   save: async (state: GameSave) => {
-    const snapshot = JSON.parse(JSON.stringify({ ...state, version: 3, updatedAt: new Date().toISOString() })) as GameSave
+    const snapshot = JSON.parse(JSON.stringify({ ...state, version: 5, updatedAt: new Date().toISOString() })) as GameSave
     return db.saves.put(snapshot)
   },
   load: async () => {

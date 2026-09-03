@@ -55,7 +55,8 @@ export function applyFatePurchase(state: ReincarnationState, purchase: FatePurch
 
 export function calculateReincarnationPoints(player: Player): number {
   const ageYears = Math.floor(player.ageMonths / 12)
-  return Math.max(8, Math.round(12 + player.realmIndex ** 1.55 * 8 + ageYears * .16 + player.achievements.length * 14))
+  const pathReward = Math.min(30, player.pathProgress.reduce((sum, progress) => sum + Math.max(0, progress.level - 1), 0) * 2)
+  return Math.max(8, Math.round(12 + player.realmIndex ** 1.55 * 8 + ageYears * .16 + player.achievements.length * 14 + pathReward))
 }
 
 export function createLifeRecord(player: Player, deathYear: number, realmName: string, pointsEarned: number): LifeRecord {
@@ -64,5 +65,6 @@ export function createLifeRecord(player: Player, deathYear: number, realmName: s
     maxRealm: realmName, lifespan: Math.floor(player.ageMonths / 12), causeOfDeath: player.causeOfDeath ?? '命数已尽',
     achievements: [...player.achievements], timeline: [...player.timeline], pointsEarned, entryType: player.entryType,
     parentId: player.parentId, predecessorName: player.predecessorName, familyId: player.familyId,
+    primaryPath: player.primaryPath, secondaryPaths: structuredClone(player.secondaryPaths), highestPathLevel: Math.max(0, ...player.pathProgress.map((progress) => progress.level)),
   }
 }

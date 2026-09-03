@@ -46,7 +46,7 @@ describe('save serialization', () => {
   it('round trips V2 world state', () => {
     const base = deserializeSave(JSON.stringify({ version: 1, world: { currentYear: 300 }, reincarnation: {}, lifeRecords: [] }))
     expect(deserializeSave(serializeSave(base)).world.currentYear).toBe(300)
-    expect(deserializeSave(serializeSave(base)).version).toBe(3)
+    expect(deserializeSave(serializeSave(base)).version).toBe(4)
   })
   it('rejects unrelated JSON', () => expect(() => deserializeSave('{"hello":true}')).toThrow())
 })

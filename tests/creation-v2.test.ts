@@ -35,12 +35,12 @@ describe('V2 origin and stat allocation', () => {
 
 describe('V2 spirit roots and talents', () => {
   it('randomizes spirit roots through the centralized RNG', () => {
-    expect(randomSpiritRoot(new RandomService(() => 0), 0, 7).rank).toBe(1)
-    expect(randomSpiritRoot(new RandomService(() => .9999), 15, 7).rank).toBe(7)
+    expect(randomSpiritRoot(new RandomService(() => 0)).elements).toHaveLength(5)
+    expect(randomSpiritRoot(new RandomService(() => .9999), 15).quality).toBe('HEAVENLY')
   })
   it('supports a valid manual elemental root choice', () => {
     const origin = originById('farmer')
-    const root = manualSpiritRoot(4, ['水', '木'])
+    const root = manualSpiritRoot(2, ['水', '木'])
     const build = { name: '杨玄', originId: origin.id, spiritRoot: root, stats: randomizeStats(origin, 0, new RandomService(() => .3), root.statPointBonus), talentIds: [], talentBudget: 5, randomRoot: false, randomTalents: false }
     expect(build.spiritRoot.name).toBe('水木双灵根')
     expect(validateBuild(build, origin, 0, availableTalents(initialReincarnation(), 0, true))).toBe('')

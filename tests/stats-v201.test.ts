@@ -16,14 +16,14 @@ describe('V2.0.1 creation budgets', () => {
   })
 
   it('configures the correct spirit-root compensation', () => {
-    expect(ROOT_STAT_POINT_BONUS).toEqual({ 1: 6, 2: 5, 3: 4, 4: 3, 5: 1, 6: 0, 7: 0 })
-    expect(SPIRIT_ROOT_ARCHETYPES.map((root) => root.statPointBonus)).toEqual([6, 5, 4, 3, 1, 0, 0])
+    expect(ROOT_STAT_POINT_BONUS).toEqual({ 1: 6, 2: 5, 3: 3, 4: 1, 5: 0 })
+    expect(SPIRIT_ROOT_ARCHETYPES.map((root) => root.statPointBonus)).toEqual([0, 1, 3, 5, 6])
   })
 
   it('calculates origin plus root points without touching talent points', () => {
     const farmer = originById('farmer')
     const fiveRoot = SPIRIT_ROOT_ARCHETYPES[0]
-    expect(totalFreeStatPoints(farmer, fiveRoot)).toBe(56)
+    expect(totalFreeStatPoints(farmer, fiveRoot)).toBe(50)
     expect(CREATION_CONFIG.baseTalentPoints).toBe(5)
     expect('talentPoints' in farmer).toBe(false)
   })
@@ -74,8 +74,8 @@ describe('V2 save migration', () => {
       player: { id: 'v2', name: '顾玄', generation: 2, birthYear: 120, ageMonths: 480, lifespanMonths: 1200, realmIndex: 2, cultivation: 0, cultivationRequired: 300, spiritRoot: { id: 'five', name: '五灵根', rank: 1, multiplier: .86, elements: ['金', '木', '水', '火', '土'] }, stats: { comprehension: 55, luck: 55, constitution: 60, soul: 50, charm: 50 }, spiritStones: 1, inventory: [], talents: [], talentPoints: 5, origin: { id: 'farmer' }, familyId: 'f', bloodline: { familyId: 'f', familyName: '顾氏', bloodlineLevel: 1, inheritedTraits: [] }, entryType: 'reincarnation', alive: true, achievements: [], timeline: [] },
       lifeRecords: [], reincarnation: { totalPoints: 0 }, settings: {}, pity: {}, logs: [], pendingEvent: null,
     })
-    expect(save.version).toBe(3)
-    expect(save.player?.spiritRoot.statPointBonus).toBe(6)
+    expect(save.version).toBe(4)
+    expect(save.player?.spiritRoot.statPointBonus).toBe(0)
     expect(save.player?.statPotential.constitution).toBeGreaterThanOrEqual(save.player?.stats.constitution ?? 0)
     expect(save.player?.statHistory).toEqual([])
   })
