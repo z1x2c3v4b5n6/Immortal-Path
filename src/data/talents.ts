@@ -23,6 +23,7 @@ export const TALENTS: TalentDefinition[] = [
   { id: 'dao-body', name: '先天道体', quality: '极品', cost: 6, description: '综合修炼优势，体魄与悟性兼备。', effects: [{ type: 'stat', stat: 'constitution', value: 10 }, { type: 'stat', stat: 'comprehension', value: 10 }, { type: 'cultivationMultiplier', value: .16 }], unlockRequirement: { type: 'achievement', value: '证得元婴', description: '任意一世证得元婴' }, firstGenerationAvailable: false },
   { id: 'heaven-luck', name: '鸿运齐天', quality: '极品', cost: 7, description: '特殊奇遇权重显著提高。', effects: [{ type: 'stat', stat: 'luck', value: 18 }, { type: 'eventWeight', value: .4 }], unlockRequirement: { type: 'rareEvents', value: 8, description: '累计获得八次稀有机缘' }, firstGenerationAvailable: false },
   { id: 'immortal-soul', name: '不灭元神', quality: '传说', cost: 9, description: '强大的轮回相关潜能。', effects: [{ type: 'stat', stat: 'soul', value: 20 }, { type: 'future', value: 5 }], unlockRequirement: { type: 'generation', value: 8, description: '完成七次人生' }, firstGenerationAvailable: false },
+  { id: 'five-element-seed', name: '五行道种', quality: '传说', cost: 9, description: '由后天五行归一的因果凝成，下一世更易驾驭五行功法。', effects: [{ type: 'cultivationMultiplier', value: .12 }, { type: 'future', value: 5 }], unlockRequirement: { type: 'achievement', value: '后天五行归一', description: '曾在一世中获得「五行归一」' }, firstGenerationAvailable: false },
 ]
 
 export const talentById = (id: string) => TALENTS.find((talent) => talent.id === id)

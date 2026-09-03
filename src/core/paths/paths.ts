@@ -17,6 +17,8 @@ export function addPathExperience(player: Player, pathId: CultivationPathId, amo
   const progress = pathProgress(player, pathId)
   progress.experience += Math.max(0, amount) * (secondary ? .45 : 1)
   while (progress.level < 20 && progress.experience >= pathExperienceForLevel(progress.level + 1)) progress.level++
+  const secondaryProgress = player.secondaryPaths.find((entry) => entry.pathId === pathId)
+  if (secondaryProgress) Object.assign(secondaryProgress, progress)
   return progress
 }
 

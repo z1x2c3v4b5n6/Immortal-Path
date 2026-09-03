@@ -1,11 +1,13 @@
 import { ORIGINS, originById } from '../../data/origins'
 import { createSpiritRoot, MUTATED_ELEMENTS, ROOT_COUNT_RULES, ROOT_QUALITY_RULES, SPIRIT_ROOT_CONFIG, spiritRootPotentialModifiers, STANDARD_ELEMENTS } from '../../data/spiritRoots'
 import { instantiateTalent, TALENTS, talentById } from '../../data/talents'
-import type { CharacterBuild, Descendant, EntryType, OriginDefinition, OriginSecret, Player, PlayerStats, ReincarnationState, SpiritElement, SpiritRoot, SpiritRootQuality, StatKey, TalentDefinition, TalentQuality } from '../../models'
+import { BodyRealm, CharacterState, type CharacterBuild, type Descendant, type EntryType, type OriginDefinition, type OriginSecret, type Player, type PlayerStats, type ReincarnationState, type SpiritElement, type SpiritRoot, type SpiritRootQuality, type StatKey, type TalentDefinition, type TalentQuality } from '../../models'
 import type { RandomService } from '../random/RandomService'
 import { REALMS } from '../../data/realms'
 import { initialPathResources } from '../paths/paths'
 import { calculateMaxLifespanMonths } from '../lifespan/lifespan'
+import { createSpiritualAptitude } from '../aptitude/aptitude'
+import { initialCultivationResources } from '../actions/actionEffects'
 
 export const STAT_KEYS: StatKey[] = ['comprehension', 'luck', 'constitution', 'soul', 'charm']
 export const STAT_LABELS: Record<StatKey, string> = { comprehension: '悟性', luck: '气运', constitution: '体魄', soul: '神识', charm: '魅力' }
@@ -49,7 +51,7 @@ export function randomizeStats(origin: OriginDefinition, capBonus: number, rng: 
   return result
 }
 
-export interface RandomSpiritRootOptions { allowMutation?: boolean; allowHeavenly?: boolean }
+export interface RandomSpiritRootOptions { allowMutation?: boolean; allowHeavenly?: boolean; heavenlyWeightMultiplier?: number }
 
 export function randomSpiritRoot(rng: RandomService, rootLuck = 0, options: RandomSpiritRootOptions = {}): SpiritRoot {
   // 第一阶段：决定广度。数量不代表稀有度，也不受“越少越好”的旧阶梯影响。
@@ -64,7 +66,7 @@ export function randomSpiritRoot(rng: RandomService, rootLuck = 0, options: Rand
   const qualities: SpiritRootQuality[] = options.allowHeavenly === false ? ['NORMAL', 'PURE'] : ['NORMAL', 'PURE', 'HEAVENLY']
   const quality = rng.weightedRandom(qualities.map((value) => ({
     value,
-    weight: ROOT_QUALITY_RULES[value].randomWeight * (value === 'NORMAL' ? 1 : 1 + Math.max(0, rootLuck) * SPIRIT_ROOT_CONFIG.qualityLuckScale),
+    weight: ROOT_QUALITY_RULES[value].randomWeight * (value === 'NORMAL' ? 1 : 1 + Math.max(0, rootLuck) * SPIRIT_ROOT_CONFIG.qualityLuckScale) * (value === 'HEAVENLY' ? options.heavenlyWeightMultiplier ?? 1 : 1),
   })))
   return createSpiritRoot(elements, quality)
 }
@@ -129,7 +131,6 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
   const finalStats = { ...build.stats }
   talentStatEffects(finalStats, talents)
   if (build.randomRoot) finalStats.luck += SPIRIT_ROOT_CONFIG.randomLuckBonus
-  const lifespanMultiplier = 1 + talents.flatMap((talent) => talent.effects).filter((effect) => effect.type === 'lifespanMultiplier').reduce((sum, effect) => sum + effect.value, 0)
   const realm = REALMS[origin.startingRealmIndex]
   const player: Player = {
     id: crypto.randomUUID(), name: build.name.trim() || rng.pick(['沈砚', '林昭', '顾长风', '苏问雪', '江照夜', '叶知秋']), generation,
@@ -138,12 +139,15 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
     spiritRoot: structuredClone(build.spiritRoot), stats: finalStats, statPotential: createStatPotential(origin, potentialBonus, rng, finalStats, build.spiritRoot), statHistory: [], spiritStones: origin.startingSpiritStones, inventory: [],
     talents: talents.map((talent) => instantiateTalent(talent, generation)), talentPoints: build.talentBudget, origin, originSecret: origin.id === 'mystery' ? rng.pick(secrets) : undefined,
     familyId, bloodline: { familyId, familyName, bloodlineLevel: entryType === 'initial' ? 1 : 0, inheritedTraits: origin.tags.filter((tag) => tag.includes('血脉')) },
-    entryType, predecessorName, alive: true, achievements: [], timeline: [],
+    entryType, predecessorName, alive: true, deathFinalized: false, achievements: [], timeline: [],
     secondaryPaths: [], pathProgress: [], pathResources: initialPathResources(), unlockedPaths: ['dao', 'sword', 'body'],
     lifespanFateModifier: rng.randomInt(-100, 100) / 1000, lifespanBonusMonths: 0,
+    spiritualAptitude: createSpiritualAptitude(build.spiritRoot), acquiredTalents: [], knownTechniques: ['plain-breath'], techniqueProgress: [],
+    nearDeathCount: 0, dangerousEventCount: 0, severeInjuryCount: 0, luckyOutcomeStreak: 0, rareEventCount: 0, lateMajorBreakthroughs: 0,
+    lifeEventHistory: [], fateTags: [], fatePaths: [], lifeTimeline: [], importantEvents: [],
+    cultivationLogs: [], resources: initialCultivationResources(), characterStates: [CharacterState.NORMAL], breakthroughHistory: [], breakthroughProgress: 0,
+    bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
   }
-  // 旧天赋倍率已由统一寿元函数读取；保留局部变量只为避免旧创建逻辑遗漏。
-  void lifespanMultiplier
   player.lifespanMonths = calculateMaxLifespanMonths(player)
   return player
 }

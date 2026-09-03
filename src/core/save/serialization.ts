@@ -2,13 +2,16 @@ import { originById } from '../../data/origins'
 import { CREATION_CONFIG } from '../../data/creationConfig'
 import { createSpiritRoot, MUTATED_ELEMENTS, STANDARD_ELEMENTS } from '../../data/spiritRoots'
 import { instantiateTalent, talentById } from '../../data/talents'
-import type { CultivationPathId, CultivationPathProgress, Descendant, EntryType, GameSave, LifeRecord, Player, PlayerStats, ReincarnationState, SpiritElement, SpiritRoot, SpiritRootQuality, TalentDefinition, TalentInstance, WorldState } from '../../models'
+import { BodyRealm, CharacterState, CultivationAction, type AcquiredSpiritRoot, type CultivationPathId, type CultivationPathProgress, type Descendant, type EntryType, type GameSave, type LifeRecord, type Player, type PlayerStats, type ReincarnationState, type SpiritElement, type SpiritRoot, type SpiritRootQuality, type TalentDefinition, type TalentInstance, type TechniqueProgress, type WorldState } from '../../models'
 import { initialReincarnation } from '../reincarnation/reincarnation'
 import { createWorld, generateContinent, stableLegacySeed } from '../world/world'
 import { initialPathResources } from '../paths/paths'
 import { calculateMaxLifespanMonths } from '../lifespan/lifespan'
+import { ALL_SPIRIT_ELEMENTS, createSpiritualAptitude } from '../aptitude/aptitude'
+import { initialCultivationResources } from '../actions/actionEffects'
+import { BODY_REALM_ORDER } from '../actions/action'
 
-export const CURRENT_SAVE_VERSION = 5
+export const CURRENT_SAVE_VERSION = 8
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
 
@@ -38,6 +41,31 @@ function migratePotential(value: unknown, stats: PlayerStats, originId: string):
     soul: typeof old.soul === 'number' ? old.soul : Math.max(stats.soul, caps.soul),
     charm: typeof old.charm === 'number' ? old.charm : Math.max(stats.charm, caps.charm),
   }
+}
+
+function migrateAptitude(value: unknown, innateRoot: SpiritRoot): Player['spiritualAptitude'] {
+  const old = record(value)
+  const next = createSpiritualAptitude(innateRoot)
+  if (Array.isArray(old.acquiredRoots)) next.acquiredRoots = old.acquiredRoots.map((entry, index) => {
+    const root = record(entry)
+    const element = ALL_SPIRIT_ELEMENTS.includes(root.element as SpiritElement) ? root.element as SpiritElement : '木'
+    return {
+      id: typeof root.id === 'string' ? root.id : `legacy-root-${index}`, element,
+      purity: Math.max(1, Math.min(100, typeof root.purity === 'number' ? root.purity : 50)),
+      stability: Math.max(0, Math.min(100, typeof root.stability === 'number' ? root.stability : 50)),
+      source: typeof root.source === 'string' ? root.source : '旧存档迁移',
+      acquiredYear: typeof root.acquiredYear === 'number' ? root.acquiredYear : 0,
+      acquiredMonth: typeof root.acquiredMonth === 'number' ? root.acquiredMonth : 1,
+    } satisfies AcquiredSpiritRoot
+  })
+  const growth = record(old.elementalGrowth)
+  const purity = record(old.elementalPurity)
+  for (const element of ALL_SPIRIT_ELEMENTS) {
+    if (typeof growth[element] === 'number') next.elementalGrowth[element] = Math.max(0, Number(growth[element]))
+    if (typeof purity[element] === 'number') next.elementalPurity[element] = Math.max(0, Math.min(100, Number(purity[element])))
+  }
+  for (const root of next.acquiredRoots) next.elementalPurity[root.element] = Math.max(next.elementalPurity[root.element], root.purity)
+  return next
 }
 
 function migrateDescendants(value: unknown): Descendant[] {
@@ -108,6 +136,7 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
   const origin = originById(typeof oldOrigin.id === 'string' ? oldOrigin.id : 'farmer')
   const id = typeof old.id === 'string' ? old.id : crypto.randomUUID()
   const familyId = typeof old.familyId === 'string' ? old.familyId : `family-${id}`
+  const realmIndex = typeof old.realmIndex === 'number' ? old.realmIndex : 0
   const entryType: EntryType = old.entryType === 'bloodline' || old.entryType === 'reincarnation' ? old.entryType : 'initial'
   const stats = old.stats as PlayerStats
   const validPaths: CultivationPathId[] = ['dao', 'sword', 'body', 'demonic', 'ghost']
@@ -115,22 +144,49 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
   const pathProgressValue = Array.isArray(old.pathProgress) ? old.pathProgress.filter((entry): entry is CultivationPathProgress => validPaths.includes(record(entry).pathId as CultivationPathId)) : []
   const oldResources = record(old.pathResources)
   const resources = { ...initialPathResources(), ...Object.fromEntries(Object.entries(oldResources).filter(([, entry]) => typeof entry === 'number')) } as Player['pathResources']
+  const spiritRoot = migrateRoot(old.spiritRoot)
   const player: Player = {
-    ...(old as unknown as Player), id, generation, origin, familyId, entryType,
+    ...(old as unknown as Player), id, generation, origin, familyId, entryType, realmIndex,
+    ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 16 * 12,
+    lifespanMonths: typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 100 * 12,
     talents: migrateTalents(old.talents, generation), talentPoints: typeof old.talentPoints === 'number' ? old.talentPoints : CREATION_CONFIG.baseTalentPoints,
     bloodline: old.bloodline && typeof old.bloodline === 'object' ? old.bloodline as Player['bloodline'] : { familyId, familyName: `${typeof old.name === 'string' ? old.name.slice(0, 1) : '无'}氏`, bloodlineLevel: 1, inheritedTraits: [] },
     originSecret: typeof old.originSecret === 'string' ? old.originSecret as Player['originSecret'] : undefined,
-    spiritRoot: migrateRoot(old.spiritRoot), stats, statPotential: migratePotential(old.statPotential, stats, origin.id),
+    spiritRoot, spiritualAptitude: migrateAptitude(old.spiritualAptitude, spiritRoot), stats, statPotential: migratePotential(old.statPotential, stats, origin.id),
     statHistory: Array.isArray(old.statHistory) ? old.statHistory as Player['statHistory'] : [], inventory: Array.isArray(old.inventory) ? old.inventory as Player['inventory'] : [],
     achievements: Array.isArray(old.achievements) ? old.achievements as string[] : [], timeline: Array.isArray(old.timeline) ? old.timeline as Player['timeline'] : [],
-    alive: old.alive !== false, birthYear: typeof old.birthYear === 'number' ? old.birthYear : world.currentYear - 16,
+    alive: old.alive !== false, deathFinalized: typeof old.deathFinalized === 'boolean' ? old.deathFinalized : old.alive === false,
+    birthYear: typeof old.birthYear === 'number' ? old.birthYear : world.currentYear - 16,
     primaryPath, secondaryPaths: Array.isArray(old.secondaryPaths) ? old.secondaryPaths as CultivationPathProgress[] : [], pathProgress: pathProgressValue,
     pathResources: resources, unlockedPaths: Array.isArray(old.unlockedPaths) ? old.unlockedPaths.filter((entry): entry is CultivationPathId => validPaths.includes(entry as CultivationPathId)) : ['dao', 'sword', 'body'],
     soulStability: typeof old.soulStability === 'number' ? old.soulStability : primaryPath === 'ghost' ? 80 : undefined,
     lifespanFateModifier: typeof old.lifespanFateModifier === 'number' ? old.lifespanFateModifier : 0,
     lifespanBonusMonths: typeof old.lifespanBonusMonths === 'number' ? old.lifespanBonusMonths : 0,
+    acquiredTalents: Array.isArray(old.acquiredTalents) ? old.acquiredTalents as Player['acquiredTalents'] : [],
+    knownTechniques: Array.isArray(old.knownTechniques) ? old.knownTechniques.filter((entry): entry is string => typeof entry === 'string') : ['plain-breath'],
+    activeTechnique: typeof old.activeTechnique === 'string' ? old.activeTechnique : undefined,
+    techniqueProgress: Array.isArray(old.techniqueProgress) ? old.techniqueProgress as TechniqueProgress[] : [],
+    nearDeathCount: typeof old.nearDeathCount === 'number' ? old.nearDeathCount : 0,
+    dangerousEventCount: typeof old.dangerousEventCount === 'number' ? old.dangerousEventCount : 0,
+    severeInjuryCount: typeof old.severeInjuryCount === 'number' ? old.severeInjuryCount : 0,
+    luckyOutcomeStreak: typeof old.luckyOutcomeStreak === 'number' ? old.luckyOutcomeStreak : 0,
+    rareEventCount: typeof old.rareEventCount === 'number' ? old.rareEventCount : 0,
+    lateMajorBreakthroughs: typeof old.lateMajorBreakthroughs === 'number' ? old.lateMajorBreakthroughs : 0,
+    lifeEventHistory: Array.isArray(old.lifeEventHistory) ? old.lifeEventHistory as Player['lifeEventHistory'] : [],
+    fateTags: Array.isArray(old.fateTags) ? old.fateTags as Player['fateTags'] : [],
+    fatePaths: Array.isArray(old.fatePaths) ? old.fatePaths as Player['fatePaths'] : [],
+    lifeTimeline: Array.isArray(old.lifeTimeline) ? old.lifeTimeline as Player['lifeTimeline'] : [],
+    importantEvents: Array.isArray(old.importantEvents) ? old.importantEvents as Player['importantEvents'] : [],
+    cultivationLogs: Array.isArray(old.cultivationLogs) ? old.cultivationLogs as Player['cultivationLogs'] : [],
+    resources: { ...initialCultivationResources(), ...Object.fromEntries(Object.entries(record(old.resources)).filter(([, entry]) => typeof entry === 'number')) } as Player['resources'],
+    characterStates: Array.isArray(old.characterStates) ? old.characterStates.filter((entry): entry is CharacterState => Object.values(CharacterState).includes(entry as CharacterState)) : [CharacterState.NORMAL],
+    breakthroughHistory: Array.isArray(old.breakthroughHistory) ? old.breakthroughHistory as Player['breakthroughHistory'] : [],
+    breakthroughProgress: typeof old.breakthroughProgress === 'number' ? Math.max(0, Math.min(100, old.breakthroughProgress)) : (typeof old.cultivation === 'number' && typeof old.cultivationRequired === 'number' && old.cultivation >= old.cultivationRequired ? 100 : 0),
+    bodyRealm: Object.values(BodyRealm).includes(old.bodyRealm as BodyRealm) ? old.bodyRealm as BodyRealm : BODY_REALM_ORDER[Math.max(0, Math.min(5, typeof oldResources.bodyStage === 'number' ? oldResources.bodyStage : 0))],
+    bodyTrainingProgress: typeof old.bodyTrainingProgress === 'number' ? Math.max(0, old.bodyTrainingProgress) : [0, 100, 250, 450, 700, 1000][Math.max(0, Math.min(5, typeof oldResources.bodyStage === 'number' ? oldResources.bodyStage : 0))],
   }
   if (!player.unlockedPaths.length) player.unlockedPaths = ['dao', 'sword', 'body']
+  if (!player.characterStates.length) player.characterStates = [CharacterState.NORMAL]
   if (sourceVersion < 5) player.lifespanMonths = Math.max(typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 0, calculateMaxLifespanMonths(player))
   return player
 }
@@ -149,6 +205,16 @@ function migrateLifeRecords(value: unknown): LifeRecord[] {
       primaryPath: ['dao', 'sword', 'body', 'demonic', 'ghost'].includes(String(old.primaryPath)) ? old.primaryPath as CultivationPathId : undefined,
       secondaryPaths: Array.isArray(old.secondaryPaths) ? old.secondaryPaths as CultivationPathProgress[] : [],
       highestPathLevel: typeof old.highestPathLevel === 'number' ? old.highestPathLevel : 0,
+      acquiredTalents: Array.isArray(old.acquiredTalents) ? old.acquiredTalents as LifeRecord['acquiredTalents'] : [],
+      fateTags: Array.isArray(old.fateTags) ? old.fateTags as LifeRecord['fateTags'] : [],
+      fatePaths: Array.isArray(old.fatePaths) ? old.fatePaths as LifeRecord['fatePaths'] : [],
+      lifeTimeline: Array.isArray(old.lifeTimeline) ? old.lifeTimeline as LifeRecord['lifeTimeline'] : [],
+      importantEvents: Array.isArray(old.importantEvents) ? old.importantEvents as LifeRecord['importantEvents'] : [],
+      evaluationScore: typeof old.evaluationScore === 'number' ? old.evaluationScore : 0,
+      evaluationTitle: typeof old.evaluationTitle === 'string' ? old.evaluationTitle : '平凡一生',
+      cultivationLogs: Array.isArray(old.cultivationLogs) ? old.cultivationLogs as LifeRecord['cultivationLogs'] : [],
+      breakthroughHistory: Array.isArray(old.breakthroughHistory) ? old.breakthroughHistory as LifeRecord['breakthroughHistory'] : [],
+      bodyRealm: Object.values(BodyRealm).includes(old.bodyRealm as BodyRealm) ? old.bodyRealm as BodyRealm : BodyRealm.SKIN,
     }
   })
 }
@@ -177,6 +243,8 @@ export function migrateSave(value: unknown): GameSave {
     settings: { fortunateMode: true, autoSave: true, logLimit: 120, ...(record(old.settings) as Partial<GameSave['settings']>) },
     pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0, ...(record(old.pity) as Partial<GameSave['pity']>) },
     logs: Array.isArray(old.logs) ? old.logs as GameSave['logs'] : [], pendingEvent: old.pendingEvent && typeof old.pendingEvent === 'object' ? old.pendingEvent as GameSave['pendingEvent'] : null,
+    pendingLifeEvent: old.pendingLifeEvent && typeof old.pendingLifeEvent === 'object' ? old.pendingLifeEvent as GameSave['pendingLifeEvent'] : null,
+    currentAction: old.currentAction && typeof old.currentAction === 'object' && Object.values(CultivationAction).includes(record(old.currentAction).action as CultivationAction) ? old.currentAction as GameSave['currentAction'] : null,
   }
   if (save.player && !save.world.families.some((family) => family.id === save.player!.familyId)) {
     save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id] })

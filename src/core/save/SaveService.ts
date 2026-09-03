@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { GameSave } from '../../models'
-import { migrateSave } from './serialization'
+import { CURRENT_SAVE_VERSION, migrateSave } from './serialization'
 
 class GameDatabase extends Dexie {
   saves!: EntityTable<GameSave, 'id'>
@@ -11,6 +11,9 @@ class GameDatabase extends Dexie {
     this.version(3).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
     this.version(4).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
     this.version(5).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(6).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(7).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(8).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
   }
 }
 
@@ -18,7 +21,7 @@ const db = new GameDatabase()
 
 export const SaveService = {
   save: async (state: GameSave) => {
-    const snapshot = JSON.parse(JSON.stringify({ ...state, version: 5, updatedAt: new Date().toISOString() })) as GameSave
+    const snapshot = JSON.parse(JSON.stringify({ ...state, version: CURRENT_SAVE_VERSION, updatedAt: new Date().toISOString() })) as GameSave
     return db.saves.put(snapshot)
   },
   load: async () => {

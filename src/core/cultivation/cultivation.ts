@@ -1,6 +1,10 @@
 import { REALMS } from '../../data/realms'
 import type { Player, WorldState } from '../../models'
 import { pathCultivationMultiplier, spiritRootDependency } from '../paths/paths'
+import { techniqueById } from '../../data/techniques'
+import { calculateTechniqueAffinity } from '../techniques/techniques'
+import { isFiveElementImbalanced } from '../aptitude/aptitude'
+import { cultivationStateMultiplier } from '../actions/actionEffects'
 
 export function calculateCultivationGain(player: Player, months: number, world?: WorldState): number {
   const realm = REALMS[player.realmIndex]
@@ -17,6 +21,13 @@ export function calculateCultivationGain(player: Player, months: number, world?:
   const rootDependency = spiritRootDependency(player.primaryPath)
   const rootMultiplier = 1 + (player.spiritRoot.cultivationMultiplier - 1) * rootDependency
   const pathMultiplier = pathCultivationMultiplier(player, world)
-  const finalMultiplier = Math.max(.55, Math.min(3, rootMultiplier * talentMultiplier * comprehensionMultiplier * variance * pathMultiplier))
+  const technique = player.activeTechnique ? techniqueById(player.activeTechnique) : undefined
+  const affinity = technique ? calculateTechniqueAffinity(player, technique, world) : undefined
+  const techniqueLevel = technique ? player.techniqueProgress.find((entry) => entry.techniqueId === technique.id)?.level ?? 1 : 0
+  const affinityScale = affinity ? Math.max(.08, Math.min(1.5, affinity.total / 100)) : 0
+  const techniqueMultiplier = technique && affinity?.meetsMinimum ? (1 + (technique.baseCultivationEfficiency - 1) * affinityScale) * (1 + techniqueLevel * .01) : technique ? .72 : 1
+  const acquiredMultiplier = player.acquiredTalents.some((talent) => talent.talentId === 'late-bloom') && player.ageMonths >= player.lifespanMonths * .6 ? 1.08 : 1
+  const imbalanceMultiplier = technique && technique.elements.length > 1 && isFiveElementImbalanced(player.spiritualAptitude) && !player.acquiredTalents.some((talent) => talent.talentId === 'five-unity') ? .94 : 1
+  const finalMultiplier = Math.max(.3, Math.min(3.6, rootMultiplier * talentMultiplier * comprehensionMultiplier * variance * pathMultiplier * techniqueMultiplier * acquiredMultiplier * imbalanceMultiplier * cultivationStateMultiplier(player)))
   return Math.max(1, Math.round(realm.cultivationBase * months * finalMultiplier))
 }

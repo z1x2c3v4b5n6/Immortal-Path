@@ -10,7 +10,7 @@ import { useGameStore } from './stores/game'
 const game = useGameStore()
 const nav = [
   ['/', '洞府', '舍'], ['/cultivation', '修炼', '炁'], ['/adventure', '历练', '行'], ['/inventory', '乾坤袋', '囊'],
-  ['/world', '天下', '界'], ['/chronicle', '长生录', '录'], ['/reincarnation', '轮回', '轮'], ['/settings', '设置', '衡'],
+  ['/world', '天下', '界'], ['/life', '人生', '命'], ['/chronicle', '长生录', '录'], ['/reincarnation', '轮回', '轮'], ['/settings', '设置', '衡'],
 ]
 const time = computed(() => formatGameTime(game.state.world))
 onMounted(() => game.initialize())
@@ -39,6 +39,6 @@ onMounted(() => game.initialize())
       <section class="view-frame"><RouterView /></section>
       <RecentLogs v-if="game.player" />
     </main>
-    <EventModal v-if="game.pendingEvent || game.ready.eventResultText" />
+    <EventModal v-if="game.pendingEvent || game.pendingLifeEvent || game.ready.eventResultText" />
   </div>
 </template>

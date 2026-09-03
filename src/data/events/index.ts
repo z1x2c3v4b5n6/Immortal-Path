@@ -1,5 +1,6 @@
 import type { EventEffect, GameEvent } from '../../models'
 import { PATH_EVENTS } from './pathEvents'
+import { APTITUDE_EVENTS } from './aptitudeEvents'
 
 type EventSeed = [string, string, string, string, EventEffect[], string, EventEffect[]]
 
@@ -51,6 +52,6 @@ const BASE_EVENTS: GameEvent[] = seeds.map(([id, title, description, a, aEffects
   ],
 }))
 
-export const GAME_EVENTS: GameEvent[] = [...BASE_EVENTS, ...PATH_EVENTS]
+export const GAME_EVENTS: GameEvent[] = [...BASE_EVENTS, ...PATH_EVENTS, ...APTITUDE_EVENTS]
 
 export const eventById = (id: string) => GAME_EVENTS.find((event) => event.id === id)

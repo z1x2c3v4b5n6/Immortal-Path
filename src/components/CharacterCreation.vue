@@ -7,8 +7,10 @@ import { potentialRating } from '../core/stats/stats'
 import { CREATION_CONFIG } from '../data/creationConfig'
 import { manualSpiritRoot, spiritRootPotentialModifiers } from '../data/spiritRoots'
 import { TALENTS } from '../data/talents'
+import { WORLD_ERAS } from '../data/worldTraits'
 import type { PlayerStats, SpiritElement, SpiritRootQuality, StatKey } from '../models'
 import { useGameStore } from '../stores/game'
+import TalentCard from './TalentCard.vue'
 
 const game = useGameStore()
 const first = computed(() => game.state.lifeRecords.length === 0)
@@ -24,13 +26,15 @@ const stats = reactive<PlayerStats>({ ...origin.value.baseStats })
 const selectedRootCount = ref(2)
 const selectedElements = ref<SpiritElement[]>(['水', '木'])
 const selectedRootQuality = ref<SpiritRootQuality>('NORMAL')
-const rolledRoot = ref(randomSpiritRoot(random, 3))
+const rolledRoot = ref(randomSpiritRoot(random, 3, { heavenlyWeightMultiplier: WORLD_ERAS[game.state.world.continent.era].heavenlyChance }))
 const selectedTalents = ref<string[]>([])
 const error = ref('')
 const capBonus = computed(() => first.value ? 0 : game.state.reincarnation.selections.statCapBonus)
 const talentBudget = computed(() => CREATION_CONFIG.baseTalentPoints + (first.value ? 0 : game.state.reincarnation.selections.extraTalentPoints) + (talentMode.value === 'random' ? CREATION_CONFIG.randomTalentPointBonus : 0))
 const talentPool = computed(() => availableTalents(game.state.reincarnation, game.state.lifeRecords.length, first.value))
 const talentSpent = computed(() => selectedTalents.value.reduce((sum, id) => sum + (TALENTS.find((talent) => talent.id === id)?.cost ?? 0), 0))
+const talentRemaining = computed(() => talentBudget.value - talentSpent.value)
+const selectedTalentDefinitions = computed(() => selectedTalents.value.map((id) => TALENTS.find((talent) => talent.id === id)).filter((talent) => talent !== undefined))
 const rootPolicy = computed(() => manualRootPolicy(first.value, game.state.reincarnation))
 const manualRoot = computed(() => manualSpiritRoot(selectedRootCount.value, selectedElements.value, selectedRootQuality.value))
 const spiritRoot = computed(() => rootMode.value === 'random' ? rolledRoot.value : manualRoot.value)
@@ -60,12 +64,23 @@ function changeStat(key: StatKey, delta: number) {
   const result = allocateStat({ ...stats }, key, delta, origin.value, capBonus.value, remainingStats.value)
   Object.assign(stats, result.stats)
 }
+function setStat(key: StatKey, value: number) {
+  const floor = origin.value.baseStats[key]
+  const cap = origin.value.statCaps[key] + capBonus.value
+  const target = Math.max(floor, Math.min(cap, value, stats[key] + remainingStats.value))
+  changeStat(key, target - stats[key])
+}
+function setStatFromInput(key: StatKey, event: Event) { setStat(key, Number((event.target as HTMLInputElement).value)) }
+function quickStat(key: StatKey, delta: number) {
+  const availableDelta = delta > 0 ? Math.min(delta, remainingStats.value, origin.value.statCaps[key] + capBonus.value - stats[key]) : -Math.min(-delta, stats[key] - origin.value.baseStats[key])
+  changeStat(key, availableDelta)
+}
 function randomStats() { statMode.value = 'random'; Object.assign(stats, randomizeStats(origin.value, capBonus.value, random, spiritRoot.value.statPointBonus)) }
 function manualStats() { statMode.value = 'manual'; resetStats() }
 function rerollRoot() {
   rootMode.value = 'random'
   const originLuck = origin.value.modifiers.filter((modifier) => modifier.type === 'rootLuck').reduce((sum, modifier) => sum + modifier.value, 0)
-  rolledRoot.value = randomSpiritRoot(random, 3 + originLuck)
+  rolledRoot.value = randomSpiritRoot(random, 3 + originLuck, { heavenlyWeightMultiplier: WORLD_ERAS[game.state.world.continent.era].heavenlyChance })
 }
 function setRootCount(count: number) {
   selectedRootCount.value = count
@@ -83,6 +98,10 @@ function toggleTalent(id: string) {
     const cost = TALENTS.find((talent) => talent.id === id)?.cost ?? 0
     if (talentSpent.value + cost <= talentBudget.value) selectedTalents.value.push(id)
   }
+}
+function cannotAffordTalent(id: string) {
+  if (selectedTalents.value.includes(id)) return false
+  return (TALENTS.find((talent) => talent.id === id)?.cost ?? 0) > talentRemaining.value
 }
 function randomTalents() { talentMode.value = 'random'; selectedTalents.value = randomTalentIds(talentBudget.value, talentPool.value, random) }
 function manualTalents() { talentMode.value = 'manual'; selectedTalents.value = [] }
@@ -102,9 +121,9 @@ function submit() {
 
     <section class="creation-section panel"><div class="creation-index">二</div><div class="creation-content"><div class="section-title"><div><span class="eyebrow">SPIRIT ROOT</span><h2>灵根</h2></div><div class="mode-tabs"><button :class="{ active: rootMode === 'manual' }" @click="rootMode = 'manual'">自行选择</button><button :class="{ active: rootMode === 'random' }" @click="rerollRoot">随机灵根</button></div></div><div v-if="rootMode === 'manual'"><div class="root-ranks"><button v-for="count in rootPolicy.counts" :key="count" :class="{ selected: selectedRootCount === count }" @click="setRootCount(count)">{{ count === 1 ? '单灵根' : count === 2 ? '双灵根' : `${count}灵根` }}</button></div><div class="element-row"><button v-for="element in rootPolicy.elements" :key="element" :class="{ selected: selectedElements.includes(element) }" @click="toggleElement(element)">{{ element }}</button><small>已选 {{ selectedElements.length }} / {{ selectedRootCount }} 种；元素不可重复</small></div><div v-if="rootPolicy.qualities.length > 1" class="root-ranks"><button v-for="quality in rootPolicy.qualities" :key="quality" :class="{ selected: selectedRootQuality === quality }" @click="selectedRootQuality = quality">{{ qualityLabels[quality] }}</button></div><small v-if="first">第一世可手选五、四、三、双灵根；单灵根、变异元素与高品质须由随机抽取或后世权限开放。</small></div><div v-else class="random-result"><button @click="rerollRoot">再问天意</button><small>随机依次判定数量、元素、品质/变异，并额外获得 3 点气运；有机会抽中天品与五行天灵根。</small></div><div class="root-preview"><span>灵根</span><strong>{{ spiritRoot.name }}</strong><p>总修炼效率 ×{{ spiritRoot.cultivationMultiplier.toFixed(2) }} · 专精效率 ×{{ spiritRoot.specializationMultiplier.toFixed(2) }} · 突破稳定性 {{ breakthroughLabel }}</p><p>本系契合：<template v-for="element in spiritRoot.elements" :key="element">{{ element }} ×{{ elementAffinity(element) }}　</template>· 他系 ×{{ otherAffinity }}</p><p>{{ qualityLabels[spiritRoot.quality] }} · {{ spiritRoot.mutations.length ? `变异：${spiritRoot.mutations.join('、')}` : '标准五行' }} · 灵根补偿 +{{ spiritRoot.statPointBonus }} 自由属性点</p></div></div></section>
 
-    <section class="creation-section panel"><div class="creation-index">三</div><div class="creation-content"><div class="section-title"><div><span class="eyebrow">FIVE VIRTUES</span><h2>五维属性</h2></div><div class="mode-tabs"><button :class="{ active: statMode === 'manual' }" @click="manualStats">自行分配</button><button :class="{ active: statMode === 'random' }" @click="randomStats">随机属性</button></div></div><div class="stat-budget-breakdown"><span>出身自由属性点 <b>{{ origin.freeStatPoints }}</b></span><i>＋</i><span>{{ spiritRoot.name }}补偿 <b>{{ spiritRoot.statPointBonus }}</b></span><i>＝</i><span>本次可分配 <b>{{ totalStatBudget }}</b></span></div><div class="attribute-builder"><div v-for="key in STAT_KEYS" :key="key"><span>{{ STAT_LABELS[key] }}</span><button :disabled="statMode === 'random' || stats[key] <= origin.baseStats[key]" @click="changeStat(key, -1)">−</button><strong>{{ stats[key] }}</strong><button :disabled="statMode === 'random' || remainingStats <= 0 || stats[key] >= origin.statCaps[key] + capBonus" @click="changeStat(key, 1)">＋</button><i><em :style="{ width: `${Math.min(100, stats[key] / potentialFor(key) * 100)}%` }"></em></i><small>潜力 {{ potentialRating(potentialFor(key)) }}<template v-if="isDev"> · {{ potentialFor(key) }}</template></small></div></div><div class="budget-line">剩余自由属性点 <b>{{ remainingStats }}</b><span>自由属性点只用于五维；天赋点是另一种独立资源。</span></div></div></section>
+    <section class="creation-section panel"><div class="creation-index">三</div><div class="creation-content"><div class="section-title"><div><span class="eyebrow">FIVE VIRTUES</span><h2>五维属性</h2></div><div class="mode-tabs"><button :class="{ active: statMode === 'manual' }" @click="manualStats">自行分配</button><button :class="{ active: statMode === 'random' }" @click="randomStats">随机属性</button></div></div><div class="stat-budget-breakdown"><span>出身自由属性点 <b>{{ origin.freeStatPoints }}</b></span><i>＋</i><span>{{ spiritRoot.name }}补偿 <b>{{ spiritRoot.statPointBonus }}</b></span><i>＝</i><span>本次可分配 <b>{{ totalStatBudget }}</b></span></div><div class="attribute-builder"><div v-for="key in STAT_KEYS" :key="key"><span>{{ STAT_LABELS[key] }}</span><button :disabled="statMode === 'random' || stats[key] <= origin.baseStats[key]" title="减少 5 点" @click="quickStat(key, -5)">−5</button><button :disabled="statMode === 'random' || stats[key] <= origin.baseStats[key]" @click="changeStat(key, -1)">−</button><strong>{{ stats[key] }}</strong><input type="range" :aria-label="`${STAT_LABELS[key]}属性`" :min="origin.baseStats[key]" :max="Math.min(origin.statCaps[key] + capBonus, stats[key] + remainingStats)" :value="stats[key]" :disabled="statMode === 'random'" @input="setStatFromInput(key, $event)" /><button :disabled="statMode === 'random' || remainingStats <= 0 || stats[key] >= origin.statCaps[key] + capBonus" @click="changeStat(key, 1)">＋</button><button :disabled="statMode === 'random' || remainingStats <= 0 || stats[key] >= origin.statCaps[key] + capBonus" title="增加 5 点" @click="quickStat(key, 5)">+5</button><small>潜力 {{ potentialRating(potentialFor(key)) }}<template v-if="isDev"> · {{ potentialFor(key) }}</template></small></div></div><div class="budget-line">剩余自由属性点 <b>{{ remainingStats }}</b><span>拖动滑杆快速分配，也可用 ±1 / ±5 微调。</span></div></div></section>
 
-    <section class="creation-section panel"><div class="creation-index">四</div><div class="creation-content"><div class="section-title"><div><span class="eyebrow">TALENTS · 独立于自由属性</span><h2>天赋</h2></div><div class="mode-tabs"><button :class="{ active: talentMode === 'manual' }" @click="manualTalents">自行选择</button><button :class="{ active: talentMode === 'random' }" @click="randomTalents">随机天赋</button></div></div><div class="talent-budget">独立天赋点 <strong>{{ talentBudget - talentSpent }}</strong> / {{ talentBudget }}<span v-if="talentMode === 'random'">随机模式获得 +1 点天赋价值</span></div><div class="talent-picker"><button v-for="talent in talentPool" :key="talent.id" :class="{ selected: selectedTalents.includes(talent.id) }" @click="toggleTalent(talent.id)"><span>{{ talent.quality }} · {{ talent.cost }}点</span><b>{{ talent.name }}</b><small>{{ talent.description }}</small></button><div v-for="talent in lockedTalents" :key="talent.id" class="talent-locked"><span>尚未满足因果</span><b>？？？</b><small>{{ talent.unlockRequirement?.description ?? '需由轮回殿解锁选择权限' }}</small></div></div></div></section>
+    <section class="creation-section panel"><div class="creation-index">四</div><div class="creation-content"><div class="section-title"><div><span class="eyebrow">TALENTS · 独立于自由属性</span><h2>天赋</h2></div><div class="mode-tabs"><button :class="{ active: talentMode === 'manual' }" @click="manualTalents">自行选择</button><button :class="{ active: talentMode === 'random' }" @click="randomTalents">随机天赋</button></div></div><div class="talent-selection-summary"><div class="selected-talent-list"><span>已选择天赋</span><div v-if="selectedTalentDefinitions.length"><button v-for="talent in selectedTalentDefinitions" :key="talent.id" type="button" :disabled="talentMode !== 'manual'" title="点击取消" @click="toggleTalent(talent.id)">✓ {{ talent.name }}</button></div><p v-else>尚未选择天赋</p></div><div class="talent-point-metrics"><div><small>已消耗</small><strong>{{ talentSpent }}</strong></div><div><small>剩余点数</small><strong>{{ talentRemaining }}</strong></div><div><small>总预算</small><strong>{{ talentBudget }}</strong></div></div><span v-if="talentMode === 'random'" class="random-budget-note">随机模式获得 +1 点天赋价值</span></div><div class="talent-picker"><TalentCard v-for="talent in talentPool" :key="talent.id" :name="talent.name" :description="talent.description" :meta="`${talent.quality} · ${talent.cost}点`" :selected="selectedTalents.includes(talent.id)" :disabled="talentMode !== 'manual' || cannotAffordTalent(talent.id)" :disabled-reason="talentMode !== 'manual' ? '随机模式已锁定选择' : `点数不足，还需 ${talent.cost - talentRemaining} 点`" @toggle="toggleTalent(talent.id)" /><TalentCard v-for="talent in lockedTalents" :key="talent.id" name="？？？" :description="talent.unlockRequirement?.description ?? '需由轮回殿解锁选择权限'" meta="尚未满足因果" locked /></div></div></section>
 
     <footer class="creator-footer"><p v-if="error" class="form-error">{{ error }}</p><p v-else>出身定其始，选择定其路。所有数值将在踏入仙途后写入本地存档。</p><button class="primary" @click="submit">踏入仙途</button></footer>
   </div>

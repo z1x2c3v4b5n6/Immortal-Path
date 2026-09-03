@@ -57,6 +57,52 @@ export interface SpiritRoot {
   statPointBonus: number
 }
 
+export type TechniqueGrade = '黄阶' | '玄阶' | '地阶' | '天阶'
+export interface AcquiredSpiritRoot { id: string; element: SpiritElement; purity: number; stability: number; source: string; acquiredYear: number; acquiredMonth: number }
+export interface SpiritualAptitudeState {
+  innateRoot: SpiritRoot
+  acquiredRoots: AcquiredSpiritRoot[]
+  elementalGrowth: Record<SpiritElement, number>
+  elementalPurity: Record<SpiritElement, number>
+}
+export interface TechniqueElementRequirement { element: SpiritElement; weight: number }
+export interface TechniqueEffect { type: string; value: number; description: string }
+export interface TechniqueDefinition {
+  id: string
+  name: string
+  grade: TechniqueGrade
+  description: string
+  elements: TechniqueElementRequirement[]
+  preferredPaths: CultivationPathId[]
+  baseCultivationEfficiency: number
+  maxLevel: number
+  minimumAffinity?: number
+  rootDependency: number
+  effects: TechniqueEffect[]
+}
+export interface TechniqueProgress { techniqueId: string; experience: number; level: number }
+export interface AcquiredTalentInstance { talentId: string; name: string; acquiredYear: number; acquiredMonth: number; source: string }
+
+export enum LifeStage { CHILDHOOD = 'CHILDHOOD', TEENAGE = 'TEENAGE', MORTAL = 'MORTAL', EARLY_CULTIVATION = 'EARLY_CULTIVATION', MID_CULTIVATION = 'MID_CULTIVATION', LATE_CULTIVATION = 'LATE_CULTIVATION', OLD_AGE = 'OLD_AGE' }
+export enum CultivationAction { MEDITATION = 'MEDITATION', ADVENTURE = 'ADVENTURE', ENLIGHTENMENT = 'ENLIGHTENMENT', BODY_TRAINING = 'BODY_TRAINING', TRAVEL = 'TRAVEL', RECOVERY = 'RECOVERY' }
+export enum CharacterState { NORMAL = 'NORMAL', INJURED = 'INJURED', SERIOUS_INJURY = 'SERIOUS_INJURY', INNER_DEMON = 'INNER_DEMON', ENLIGHTENED = 'ENLIGHTENED', BOTTLENECK = 'BOTTLENECK' }
+export enum BodyRealm { SKIN = 'SKIN', FLESH = 'FLESH', BONE = 'BONE', VISCERA = 'VISCERA', BLOOD = 'BLOOD', GOLDEN_BODY = 'GOLDEN_BODY' }
+export interface CultivationResources { spiritHerbs: number; beastCores: number; bodyMaterials: number; soulCrystals: number }
+export interface CurrentAction { action: CultivationAction; startedYear: number; durationYears: number }
+export type ActionResultType = 'ordinary' | 'technique-breakthrough' | 'insight' | 'bottleneck' | 'inner-demon' | 'resource' | 'danger' | 'recovery'
+export interface CultivationLog { id: string; year: number; month: number; action: CultivationAction; years: number; title: string; summary: string; cultivationGain: number; techniqueExperience: number; resultType: ActionResultType }
+export interface BreakthroughRecord { id: string; year: number; month: number; fromRealm: string; toRealm: string; success: boolean; chance: number; result: string; lifespanBefore: number; lifespanAfter: number }
+export type LifeEventConditionType = 'MIN_AGE' | 'MAX_AGE' | 'MIN_REALM' | 'MAX_REALM' | 'PATH' | 'ROOT_ELEMENT' | 'TALENT' | 'ACQUIRED_TALENT' | 'FATE_TAG' | 'NOT_FATE_TAG' | 'HISTORY_TAG' | 'WORLD_TRAIT' | 'MIN_STAT'
+export interface EventCondition { type: LifeEventConditionType; value: string | number; stat?: StatKey }
+export type LifeEventEffectType = 'ADD_STAT' | 'ADD_CULTIVATION' | 'ADD_STONES' | 'LEARN_TECHNIQUE' | 'ACQUIRE_ROOT' | 'TRIGGER_TALENT' | 'ADD_FATE_TAG' | 'REMOVE_FATE_TAG' | 'ADD_TIMELINE' | 'ADD_PATH_RESOURCE'
+export interface LifeEventEffect { type: LifeEventEffectType; value: string | number; stat?: StatKey; element?: SpiritElement; purity?: number; stability?: number; pathResource?: keyof PathResources; text?: string }
+export interface EventChoice { id: string; label: string; description?: string; result: string; effects: LifeEventEffect[] }
+export interface LifeEvent { id: string; name: string; description: string; stage: LifeStage; conditions: EventCondition[]; choices: EventChoice[]; weight: number; cooldown: number; tags: string[]; importance: 1 | 2 | 3 | 4 }
+export interface FateTag { id: string; name: string; description: string; createdAt: number }
+export interface LifeEventRecord { eventId: string; eventName: string; year: number; month: number; age: number; choice: string; choiceLabel: string; result: string; importance: 1 | 2 | 3 | 4; tags: string[] }
+export interface LifeTimelineEntry { id: string; year: number; month: number; age: number; text: string; type: 'begin' | 'event' | 'realm' | 'inheritance' | 'danger' | 'talent' | 'fate' | 'death'; importance: 1 | 2 | 3 | 4 }
+export interface FatePathState { id: string; name: string; description: string; progress: number; status: 'forming' | 'completed'; milestones: string[]; evaluation: number; completedYear?: number }
+
 export interface TalentEffect {
   type: 'stat' | 'cultivationMultiplier' | 'breakthroughBonus' | 'lifespanMultiplier' | 'eventWeight' | 'future'
   stat?: StatKey
@@ -129,6 +175,7 @@ export interface Player {
   parentId?: string
   predecessorName?: string
   alive: boolean
+  deathFinalized: boolean
   causeOfDeath?: string
   achievements: string[]
   timeline: TimelineEvent[]
@@ -140,6 +187,29 @@ export interface Player {
   soulStability?: number
   lifespanFateModifier: number
   lifespanBonusMonths: number
+  spiritualAptitude: SpiritualAptitudeState
+  acquiredTalents: AcquiredTalentInstance[]
+  knownTechniques: string[]
+  activeTechnique?: string
+  techniqueProgress: TechniqueProgress[]
+  nearDeathCount: number
+  dangerousEventCount: number
+  severeInjuryCount: number
+  luckyOutcomeStreak: number
+  rareEventCount: number
+  lateMajorBreakthroughs: number
+  lifeEventHistory: LifeEventRecord[]
+  fateTags: FateTag[]
+  fatePaths: FatePathState[]
+  lifeTimeline: LifeTimelineEntry[]
+  importantEvents: LifeTimelineEntry[]
+  cultivationLogs: CultivationLog[]
+  resources: CultivationResources
+  characterStates: CharacterState[]
+  breakthroughHistory: BreakthroughRecord[]
+  breakthroughProgress: number
+  bodyRealm: BodyRealm
+  bodyTrainingProgress: number
 }
 
 export interface Descendant {
@@ -244,6 +314,16 @@ export interface LifeRecord {
   primaryPath?: CultivationPathId
   secondaryPaths: CultivationPathProgress[]
   highestPathLevel: number
+  acquiredTalents: AcquiredTalentInstance[]
+  fateTags: FateTag[]
+  fatePaths: FatePathState[]
+  lifeTimeline: LifeTimelineEntry[]
+  importantEvents: LifeTimelineEntry[]
+  evaluationScore: number
+  evaluationTitle: string
+  cultivationLogs: CultivationLog[]
+  breakthroughHistory: BreakthroughRecord[]
+  bodyRealm: BodyRealm
 }
 
 export interface ReincarnationSelections {
@@ -270,8 +350,8 @@ export interface ReincarnationState {
 export interface PityState { rollsWithoutRare: number; rollsWithoutEpic: number }
 export interface GameSettings { fortunateMode: boolean; autoSave: boolean; logLimit: number }
 
-export type EffectType = 'stones' | 'cultivation' | 'lifespan' | 'stat' | 'item' | 'death' | 'pathResource' | 'pathExperience' | 'unlockPath' | 'soulStability'
-export interface EventEffect { type: EffectType; value?: number; stat?: StatKey; itemId?: string; pathId?: CultivationPathId; resource?: keyof PathResources; text: string }
+export type EffectType = 'stones' | 'cultivation' | 'lifespan' | 'stat' | 'item' | 'death' | 'pathResource' | 'pathExperience' | 'unlockPath' | 'soulStability' | 'acquireRoot' | 'purifyRoot' | 'stabilizeRoot' | 'elementalGrowth' | 'acquiredTalent'
+export interface EventEffect { type: EffectType; value?: number; stat?: StatKey; itemId?: string; pathId?: CultivationPathId; resource?: keyof PathResources; element?: SpiritElement; purity?: number; stability?: number; talentId?: string; source?: string; text: string }
 export interface EventRequirement { stat?: StatKey; min?: number; realmIndex?: number }
 export type EventOutcomeTag = 'rare' | 'danger' | 'insight'
 export interface EventOutcome {
@@ -291,6 +371,7 @@ export interface EventOption {
 export interface GameEvent { id: string; title: string; description: string; weight: number; minRealmIndex?: number; pathRequirements?: CultivationPathId[]; pathWeights?: Partial<Record<CultivationPathId, number>>; options: EventOption[] }
 
 export interface PendingEvent { eventId: string }
+export interface PendingLifeEvent { eventId: string }
 export interface CharacterBuild {
   name: string
   originId: string
@@ -315,4 +396,6 @@ export interface GameSave {
   pity: PityState
   logs: LogEntry[]
   pendingEvent: PendingEvent | null
+  pendingLifeEvent: PendingLifeEvent | null
+  currentAction: CurrentAction | null
 }

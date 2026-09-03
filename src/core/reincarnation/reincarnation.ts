@@ -1,4 +1,5 @@
 import type { LifeRecord, Player, ReincarnationSelections, ReincarnationState, TalentQuality } from '../../models'
+import { completedFateEvaluation } from '../lifeEvents/fatePath'
 
 export const defaultSelections = (): ReincarnationSelections => ({ extraTalentPoints: 0, statCapBonus: 0, maxTalentQuality: '优秀', canChooseSingleRoot: false, canChooseMutatedElements: false, maxRootQuality: 'NORMAL', advancedOriginAccess: false, carryMemory: false })
 export const initialReincarnation = (): ReincarnationState => ({ totalPoints: 0, unlockedTalents: [], unlockedOrigins: [], rareEventCount: 0, rareLootCount: 0, selections: defaultSelections(), inHall: false })
@@ -56,15 +57,31 @@ export function applyFatePurchase(state: ReincarnationState, purchase: FatePurch
 export function calculateReincarnationPoints(player: Player): number {
   const ageYears = Math.floor(player.ageMonths / 12)
   const pathReward = Math.min(30, player.pathProgress.reduce((sum, progress) => sum + Math.max(0, progress.level - 1), 0) * 2)
-  return Math.max(8, Math.round(12 + player.realmIndex ** 1.55 * 8 + ageYears * .16 + player.achievements.length * 14 + pathReward))
+  const fateReward = Math.floor(completedFateEvaluation(player) / 10)
+  return Math.max(8, Math.round(12 + player.realmIndex ** 1.55 * 8 + ageYears * .16 + player.achievements.length * 14 + pathReward + fateReward))
+}
+
+export function calculateLifeEvaluation(player: Player) {
+  const score = completedFateEvaluation(player) + player.realmIndex * 5 + player.importantEvents.length * 2
+  const title = score >= 260 ? '万古留名' : score >= 180 ? '一代传奇' : score >= 110 ? '名动一方' : score >= 55 ? '道途有成' : '平凡一生'
+  return { score, title }
 }
 
 export function createLifeRecord(player: Player, deathYear: number, realmName: string, pointsEarned: number): LifeRecord {
+  const evaluation = calculateLifeEvaluation(player)
   return {
     generation: player.generation, playerName: player.name, playerId: player.id, birthYear: player.birthYear, deathYear,
     maxRealm: realmName, lifespan: Math.floor(player.ageMonths / 12), causeOfDeath: player.causeOfDeath ?? '命数已尽',
     achievements: [...player.achievements], timeline: [...player.timeline], pointsEarned, entryType: player.entryType,
     parentId: player.parentId, predecessorName: player.predecessorName, familyId: player.familyId,
-    primaryPath: player.primaryPath, secondaryPaths: structuredClone(player.secondaryPaths), highestPathLevel: Math.max(0, ...player.pathProgress.map((progress) => progress.level)),
+    primaryPath: player.primaryPath, secondaryPaths: player.secondaryPaths.map((progress) => ({ ...progress })), highestPathLevel: Math.max(0, ...player.pathProgress.map((progress) => progress.level)),
+    acquiredTalents: player.acquiredTalents.map((talent) => ({ ...talent })),
+    fateTags: player.fateTags.map((tag) => ({ ...tag })),
+    fatePaths: player.fatePaths.map((path) => ({ ...path, milestones: [...path.milestones] })),
+    lifeTimeline: player.lifeTimeline.map((entry) => ({ ...entry })),
+    importantEvents: player.importantEvents.map((entry) => ({ ...entry })),
+    evaluationScore: evaluation.score, evaluationTitle: evaluation.title,
+    cultivationLogs: player.cultivationLogs.map((entry) => ({ ...entry })),
+    breakthroughHistory: player.breakthroughHistory.map((entry) => ({ ...entry })), bodyRealm: player.bodyRealm,
   }
 }

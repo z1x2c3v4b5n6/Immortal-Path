@@ -6,7 +6,7 @@ import { calculateReincarnationPoints } from '../src/core/reincarnation/reincarn
 import { deserializeSave, serializeSave } from '../src/core/save/serialization'
 import { addMonths } from '../src/core/time/time'
 import { REALMS } from '../src/data/realms'
-import { playerFixture } from './fixtures'
+import { playerFixture, worldFixture } from './fixtures'
 
 describe('random service', () => {
   it('uses cumulative weights deterministically', () => {
@@ -17,9 +17,10 @@ describe('random service', () => {
 
 describe('existing game rules', () => {
   it('keeps the full V1 realm progression', () => {
-    expect(REALMS).toHaveLength(23)
+    expect(REALMS).toHaveLength(43)
     expect(REALMS[11].name).toContain('筑基')
-    expect(REALMS[REALMS.length - 1].name).toBe('元婴·圆满')
+    expect(REALMS[18].name).toBe('金丹·圆满')
+    expect(REALMS[REALMS.length - 1].name).toBe('渡劫·圆满')
   })
   it('calculates bounded breakthrough chance', () => {
     const result = calculateBreakthroughChance(playerFixture())
@@ -27,7 +28,7 @@ describe('existing game rules', () => {
     expect(result.final).toBeLessThanOrEqual(.96)
   })
   it('advances world time by month', () => {
-    const world = { currentYear: 100, currentMonth: 11, eraName: '玄历', worldEvents: [], sects: [], npcs: [], descendants: [], families: [] }
+    const world = worldFixture({ currentYear: 100, currentMonth: 11, worldEvents: [], sects: [], npcs: [], descendants: [], families: [] })
     addMonths(world, 3)
     expect([world.currentYear, world.currentMonth]).toEqual([101, 2])
   })
@@ -46,7 +47,7 @@ describe('save serialization', () => {
   it('round trips V2 world state', () => {
     const base = deserializeSave(JSON.stringify({ version: 1, world: { currentYear: 300 }, reincarnation: {}, lifeRecords: [] }))
     expect(deserializeSave(serializeSave(base)).world.currentYear).toBe(300)
-    expect(deserializeSave(serializeSave(base)).version).toBe(4)
+    expect(deserializeSave(serializeSave(base)).version).toBe(8)
   })
   it('rejects unrelated JSON', () => expect(() => deserializeSave('{"hello":true}')).toThrow())
 })
