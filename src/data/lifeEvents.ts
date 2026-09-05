@@ -1,8 +1,11 @@
 import { LifeStage, type EventChoice, type EventCondition, type LifeEvent, type LifeEventEffect } from '../models'
+import { OPPORTUNITY_EVENTS } from './opportunityEvents'
+import { SOCIAL_EVENTS } from './socialEvents'
 
 type Seed = {
   id: string; name: string; description: string; stage: LifeStage; importance: 1 | 2 | 3 | 4; tags: string[]
   effect: LifeEventEffect; fate: string; conditions?: EventCondition[]; weight?: number; cooldown?: number
+  riskLevel?: 0 | 1 | 2 | 3 | 4; rewardLevel?: 1 | 2 | 3 | 4; dangerTags?: string[]; recommendedRealmIndex?: number
 }
 
 const seeds: Seed[] = [
@@ -57,13 +60,16 @@ function choices(seed: Seed, index: number): EventChoice[] {
     { id: 'leave', label: '转身离开', description: '不介入陌生人的命数。', result: '山风掩去身后的咳声，这段因果暂且与你无关。', effects: [{ type: 'ADD_FATE_TAG', value: 'IGNORED_ELDER', text: '见死未救' }] },
   ]
   return [
-    { id: 'engage', label: '主动介入', description: '承担风险，也接受随之而来的因果。', result: `你选择直面「${seed.name}」，此事从此成为一段人生痕迹。`, effects: [seed.effect, ...(seed.effect.type === 'ADD_FATE_TAG' && seed.effect.value === seed.fate ? [] : [{ type: 'ADD_FATE_TAG' as const, value: seed.fate, text: `${seed.name}之因` }])] },
-    { id: 'seek', label: '为己谋取', description: '先衡量此事能为修行带来什么。', result: '你取走眼前所得，但另一种可能也随之消散。', effects: [index % 2 ? { type: 'ADD_CULTIVATION', value: 60 + index * 5, text: '借机修行' } : { type: 'ADD_STONES', value: 12 + index, text: '取走资源' }, { type: 'ADD_FATE_TAG', value: `SELF_${seed.id.toUpperCase()}`, text: '利己之择' }] },
-    { id: 'leave', label: '谨慎离开', description: '保全自身，不让陌生因果缠身。', result: '你记住了所见，却没有再向前一步。', effects: [{ type: 'ADD_FATE_TAG', value: `PASSED_${seed.id.toUpperCase()}`, text: '擦肩而过' }] },
+    { id: 'engage', label: '主动介入', description: '承担风险，也接受随之而来的因果。', result: `你选择直面「${seed.name}」，此事从此成为一段人生痕迹。`, effects: [seed.effect, ...(seed.effect.type === 'ADD_FATE_TAG' && seed.effect.value === seed.fate ? [] : [{ type: 'ADD_FATE_TAG' as const, value: seed.fate, text: `${seed.name}之因` }])], riskModifier: 1, rewardModifier: 0 },
+    { id: 'seek', label: '为己谋取', description: '先衡量此事能为修行带来什么。', result: '你取走眼前所得，但另一种可能也随之消散。', effects: [index % 2 ? { type: 'ADD_CULTIVATION', value: 60 + index * 5, text: '借机修行' } : { type: 'ADD_STONES', value: 12 + index, text: '取走资源' }, { type: 'ADD_FATE_TAG', value: `SELF_${seed.id.toUpperCase()}`, text: '利己之择' }], riskModifier: .7, rewardModifier: 0 },
+    { id: 'leave', label: '谨慎离开', description: '保全自身，不让陌生因果缠身。', result: '你记住了所见，却没有再向前一步。', effects: [{ type: 'ADD_FATE_TAG', value: `PASSED_${seed.id.toUpperCase()}`, text: '擦肩而过' }], riskModifier: 0, rewardModifier: -1 },
   ]
 }
 
-export const LIFE_EVENTS: LifeEvent[] = seeds.map((seed, index) => ({
+export const BASE_LIFE_EVENTS: LifeEvent[] = seeds.map((seed, index) => ({
   id: seed.id, name: seed.name, description: seed.description, stage: seed.stage, conditions: seed.conditions ?? [],
   choices: choices(seed, index), weight: seed.weight ?? 8 + index % 5, cooldown: seed.cooldown ?? 12, tags: seed.tags, importance: seed.importance,
+  riskLevel: seed.riskLevel ?? (seed.tags.includes('danger') ? (seed.importance >= 4 ? 3 : 2) : 0), rewardLevel: seed.rewardLevel ?? (seed.importance >= 4 ? 3 : seed.importance >= 3 ? 2 : 1), dangerTags: seed.dangerTags ?? seed.tags.filter((tag) => ['danger', 'tribulation', 'demonic'].includes(tag)), recommendedRealmIndex: seed.recommendedRealmIndex,
 }))
+
+export const LIFE_EVENTS: LifeEvent[] = [...BASE_LIFE_EVENTS, ...OPPORTUNITY_EVENTS, ...SOCIAL_EVENTS]

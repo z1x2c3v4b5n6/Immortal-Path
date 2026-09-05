@@ -51,7 +51,7 @@ h1, h2, h3, .brand b { font-family: "Noto Serif SC", "Songti SC", serif; }
 .save-state .pulse { animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
 
-.rail { position: fixed; z-index: 20; top: 74px; bottom: 0; left: 0; width: 88px; border-right: 1px solid var(--line); background: rgba(13, 17, 14, .82); }
+.rail { position: fixed; z-index: 20; top: 74px; bottom: 0; left: 0; width: 88px; overflow-y: auto; scrollbar-width: none; border-right: 1px solid var(--line); background: rgba(13, 17, 14, .82); }
 .rail nav { padding: 16px 10px; display: grid; gap: 4px; }
 .rail a { height: 63px; color: #687268; display: grid; place-items: center; align-content: center; gap: 3px; border-left: 2px solid transparent; border-radius: 3px; transition: .2s; }
 .rail a span { font-family: "Noto Serif SC", serif; font-size: 17px; }
@@ -459,6 +459,13 @@ button:disabled, .button:disabled { opacity: .35; cursor: not-allowed; transform
 
 .modal-backdrop { position: fixed; z-index: 100; inset: 0; background: rgba(3,5,3,.78); backdrop-filter: blur(10px); display: grid; place-items: center; }
 .event-modal { width: 550px; padding: 37px; border: 1px solid var(--line-bright); background: radial-gradient(circle at 50% 0%, rgba(120,155,123,.14), transparent 44%), #141a15; text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.event-modal.high-risk-event { border-color: rgba(180, 87, 61, .85); background: radial-gradient(circle at 50% 0%, rgba(149, 55, 38, .24), transparent 48%), #171513; box-shadow: 0 30px 90px rgba(77, 10, 3, .58), inset 0 0 34px rgba(153, 63, 39, .08); }
+.risk-warning { display: grid; gap: 7px; margin: 18px 0; padding: 13px 16px; border: 1px solid rgba(191, 169, 111, .24); background: rgba(191, 169, 111, .06); text-align: left; }
+.risk-warning b { color: #d7c58c; letter-spacing: .08em; }
+.risk-warning span { color: var(--muted); font-size: 13px; }
+.risk-warning small { color: #c6b694; line-height: 1.65; }
+.risk-warning.risk-3, .risk-warning.risk-4 { border-color: rgba(202, 91, 62, .52); background: rgba(128, 31, 18, .18); }
+.risk-warning.risk-3 b, .risk-warning.risk-4 b { color: #ef9d76; }
 .event-glyph { width: 56px; height: 56px; margin: 0 auto 18px; display: grid; place-items: center; border: 1px solid var(--line-bright); border-radius: 50%; font: 20px "Noto Serif SC", serif; color: var(--gold); }
 .event-modal h2 { margin: 0 0 13px; font-size: 24px; letter-spacing: .12em; }
 .event-copy { max-width: 420px; margin: 0 auto 25px; color: #9ca299; font: 12px/2 "Noto Serif SC", serif; }
@@ -488,6 +495,10 @@ button:disabled, .button:disabled { opacity: .35; cursor: not-allowed; transform
 
 .life-page { display: grid; gap: 18px; }
 .life-section { padding: 22px; }
+.life-ledger-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.life-ledger-grid article { display: grid; gap: 6px; padding: 15px; border: 1px solid rgba(185, 148, 78, .22); background: linear-gradient(145deg, rgba(120, 80, 33, .1), rgba(79, 28, 18, .08)); }
+.life-ledger-grid article > span, .life-ledger-grid article > small { color: var(--muted); }
+.life-ledger-grid article > b { color: #e2c981; font: 24px/1 serif; }
 .fate-path-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
 .fate-path-card { padding: 16px; border: 1px solid rgba(192, 158, 84, .18); background: rgba(9, 15, 11, .55); }
 .fate-path-card.completed { border-color: rgba(226, 188, 85, .7); background: linear-gradient(135deg, rgba(103, 79, 26, .28), rgba(19, 29, 20, .72)); }
@@ -507,7 +518,60 @@ button:disabled, .button:disabled { opacity: .35; cursor: not-allowed; transform
 .life-timeline small, .muted { color: var(--muted); }
 .life-timeline.important b { color: #e4d29b; }
 
+.sect-page, .relations-page { display: grid; gap: 16px; }
+.sect-membership, .family-profile { padding: 22px; }
+.sect-banner { display: flex; gap: 16px; align-items: center; }
+.sect-banner h2, .sect-choice h2 { margin: 3px 0 6px; font-family: "Noto Serif SC", serif; }
+.sect-banner p, .sect-choice p { margin: 0; color: var(--muted); }
+.sect-seal.large { width: 58px; height: 58px; flex: 0 0 58px; color: var(--gold); font-size: 24px; }
+.social-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
+.social-metrics article { display: grid; gap: 6px; padding: 13px; border: 1px solid rgba(191, 166, 103, .18); background: rgba(7, 12, 9, .48); }
+.social-metrics small { color: var(--muted); }
+.social-metrics b { color: #ddc681; }
+.sect-actions { display: flex; gap: 9px; }
+.sect-selection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.sect-choice { display: grid; gap: 15px; padding: 19px; }
+.sect-choice-head { display: flex; align-items: center; gap: 12px; }
+.sect-choice-head small { color: var(--gold); }
+.sect-choice dl { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 14px; margin: 0; }
+.sect-choice dl div { display: flex; justify-content: space-between; color: var(--muted); }
+.sect-choice dt, .sect-choice dd { margin: 0; }
+.sect-offerings, .peer-ranking, .relationship-list { display: grid; gap: 8px; }
+.sect-offerings article, .peer-ranking article { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.sect-offerings article > div, .peer-ranking article > div { display: grid; gap: 4px; }
+.sect-offerings small, .peer-ranking small { color: var(--muted); }
+.peer-ranking article > strong { width: 28px; color: var(--gold); font: 18px serif; }
+.peer-ranking article.self { border: 1px solid rgba(205, 172, 92, .42); background: rgba(113, 82, 25, .12); }
+.text-button, .relation-actions button { border: 0; background: transparent; color: var(--jade-bright); cursor: pointer; }
+.relationship-list article { display: grid; grid-template-columns: 52px 1fr 38px auto; gap: 12px; align-items: center; padding: 13px; border: 1px solid rgba(255,255,255,.06); }
+.relationship-list article > span { color: var(--gold); }
+.relationship-list article > div:not(.relation-actions) { display: grid; gap: 3px; }
+.relationship-list small, .relationship-list p { margin: 0; color: var(--muted); }
+.relationship-list strong { font: 20px serif; color: #d8c17c; }
+.relation-actions { display: flex; gap: 6px; }
+.relation-敌对, .relation-仇恨 { border-color: rgba(177, 68, 47, .35) !important; }
+.descendant-social-grid, .territory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.descendant-social-grid article, .territory-grid article { display: grid; gap: 6px; padding: 13px; border: 1px solid rgba(255,255,255,.06); background: rgba(6, 10, 8, .42); }
+.descendant-social-grid small, .territory-grid small, .territory-grid p { margin: 0; color: var(--muted); }
+.territory-grid strong { color: var(--gold); font: 21px serif; }
+.sect-relation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sect-relation-grid article { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; padding: 10px; border: 1px solid rgba(255,255,255,.06); text-align: center; }
+.sect-relation-grid span { color: var(--muted); font-size: 11px; }
+.sect-relation-grid .relation-敌对 span { color: #df826d; }
+.sect-relation-grid .relation-盟友 span { color: var(--jade-bright); }
+.chronicle-social { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chronicle-social span { padding: 6px 9px; border: 1px solid rgba(190, 161, 92, .2); color: #cbb878; font-size: 11px; }
+
 @media (max-width: 820px) {
   .fate-path-grid { grid-template-columns: 1fr; }
+  .life-ledger-grid { grid-template-columns: 1fr; }
+  .sect-selection, .sect-relation-grid { grid-template-columns: 1fr; }
+  .social-metrics, .territory-grid, .descendant-social-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .relationship-list article { grid-template-columns: 48px 1fr 32px; }
+  .relation-actions { grid-column: 2 / -1; }
   .life-timeline li { grid-template-columns: 54px 1fr; }
+}
+
+@media (max-width: 520px) {
+  .social-metrics, .territory-grid, .descendant-social-grid { grid-template-columns: 1fr; }
 }

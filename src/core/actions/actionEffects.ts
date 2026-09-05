@@ -41,6 +41,16 @@ export function breakthroughStateModifier(player: Player) {
   return modifier
 }
 
+export function lifeEventStateMultiplier(player: Player) {
+  let multiplier = 1
+  if (hasCharacterState(player, CharacterState.INJURED)) multiplier *= 1.12
+  if (hasCharacterState(player, CharacterState.SERIOUS_INJURY)) multiplier *= 1.28
+  if (hasCharacterState(player, CharacterState.INNER_DEMON)) multiplier *= 1.22
+  if (hasCharacterState(player, CharacterState.ENLIGHTENED)) multiplier *= 1.18
+  if (hasCharacterState(player, CharacterState.BOTTLENECK)) multiplier *= 1.08
+  return multiplier
+}
+
 export function updateBodyRealm(player: Player) {
   let index = 0
   for (let candidate = 0; candidate < BODY_REALM_THRESHOLDS.length; candidate++) if (player.bodyTrainingProgress >= BODY_REALM_THRESHOLDS[candidate]) index = candidate

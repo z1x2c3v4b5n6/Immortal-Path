@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { BODY_REALM_NAMES, CULTIVATION_ACTIONS } from '../src/core/actions/action'
-import { addCharacterState, cultivationStateMultiplier, initialCultivationResources } from '../src/core/actions/actionEffects'
+import { addCharacterState, cultivationStateMultiplier, initialCultivationResources, lifeEventStateMultiplier } from '../src/core/actions/actionEffects'
 import { resolveCultivationAction } from '../src/core/actions/actionResolver'
 import { calculateBreakthroughChance, checkBreakthroughRequirements } from '../src/core/breakthrough/breakthrough'
 import { RandomService } from '../src/core/random/RandomService'
@@ -92,19 +92,20 @@ describe('V3.3 states and breakthrough preparation', () => {
     addCharacterState(impaired, CharacterState.INNER_DEMON)
     expect(cultivationStateMultiplier(impaired)).toBeLessThan(cultivationStateMultiplier(normal))
     expect(calculateBreakthroughChance(impaired, worldFixture()).final).toBeLessThan(calculateBreakthroughChance(normal, worldFixture()).final)
+    expect(lifeEventStateMultiplier(impaired)).toBeGreaterThan(lifeEventStateMultiplier(normal))
   })
 
-  it('requires cultivation, technique, resources, state and preparation', () => {
+  it('tracks optional technique, resources, state and preparation without making them gates', () => {
     const player = playerFixture({ realmIndex: 10, cultivation: REALMS[10].cultivationRequired, cultivationRequired: REALMS[10].cultivationRequired, activeTechnique: 'plain-breath', breakthroughProgress: 100 })
     player.techniqueProgress.push({ techniqueId: 'plain-breath', experience: 0, level: 3 })
     let check = checkBreakthroughRequirements(player)
-    expect(check.ready).toBe(false)
-    expect(check.missing).toContain('突破资源不足')
+    expect(check.ready).toBe(true)
+    expect(check.resourcesReady).toBe(false)
     player.resources = { ...check.resourceCost }
     check = checkBreakthroughRequirements(player)
     expect(check.ready).toBe(true)
     addCharacterState(player, CharacterState.SERIOUS_INJURY)
-    expect(checkBreakthroughRequirements(player).stateReady).toBe(false)
+    expect(checkBreakthroughRequirements(player)).toMatchObject({ stateReady: false, ready: true })
   })
 })
 
@@ -128,30 +129,31 @@ describe('V3.3 store loop and breakthroughs', () => {
     player.resources = { spiritHerbs: 2, beastCores: 1, bodyMaterials: 0, soulCrystals: 0 }
     const game = useGameStore(); game.replaceState(saveFixture({ player }))
     expect(game.breakthroughRequirements).toMatchObject({ ready: true })
-    game.breakthrough(true)
+    game.breakthrough({ forceSuccess: true, useAuxiliaries: true })
     expect(game.player!.realmIndex).toBe(11)
     expect(game.player!.lifespanMonths).toBeGreaterThan(1200)
     expect(game.player!.breakthroughHistory[0].success).toBe(true)
     expect(game.player!.resources.spiritHerbs).toBe(0)
   })
 
-  it('records failure, cultivation loss and injury', () => {
+  it('records a low-realm failure with cultivation loss but no forced injury', () => {
     const player = playerFixture({ cultivation: 255, cultivationRequired: 255, breakthroughProgress: 100 })
     const game = useGameStore(); game.replaceState(saveFixture({ player }))
-    game.breakthrough(false)
+    game.breakthrough({ forceSuccess: false })
     expect(game.player!.realmIndex).toBe(1)
     expect(game.player!.cultivation).toBeLessThan(255)
     expect(game.player!.breakthroughHistory[0].success).toBe(false)
-    expect(game.player!.characterStates.some((entry) => entry === CharacterState.INJURED || entry === CharacterState.SERIOUS_INJURY)).toBe(true)
+    expect(game.player!.characterStates).toContain(CharacterState.BOTTLENECK)
+    expect(game.player!.characterStates).not.toContain(CharacterState.SERIOUS_INJURY)
   })
 })
 
-describe('Save V8 cultivation migration and JSON', () => {
+describe('cultivation migration and JSON', () => {
   it('migrates V7 saves with safe V3.3 defaults', () => {
     const save = saveFixture()
     const { cultivationLogs: _logs, resources: _resources, characterStates: _states, breakthroughHistory: _history, breakthroughProgress: _progress, bodyRealm: _bodyRealm, bodyTrainingProgress: _bodyProgress, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 7, currentAction: undefined, player: legacyPlayer })
-    expect(migrated.version).toBe(8)
+    expect(migrated.version).toBe(11)
     expect(migrated.currentAction).toBeNull()
     expect(migrated.player).toMatchObject({ cultivationLogs: [], resources: initialCultivationResources(), characterStates: [CharacterState.NORMAL], breakthroughHistory: [], breakthroughProgress: 0, bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0 })
   })
@@ -160,10 +162,10 @@ describe('Save V8 cultivation migration and JSON', () => {
     const save = saveFixture({ currentAction: { action: CultivationAction.MEDITATION, startedYear: 120, durationYears: 3 } })
     save.player!.resources.spiritHerbs = 7
     save.player!.characterStates = [CharacterState.BOTTLENECK]
-    save.player!.cultivationLogs.push({ id: 'log', year: 120, month: 1, action: CultivationAction.MEDITATION, years: 3, title: '静室修行', summary: '修为增长。', cultivationGain: 300, techniqueExperience: 20, resultType: 'ordinary' })
+    save.player!.cultivationLogs.push({ id: 'log', year: 120, month: 1, action: CultivationAction.MEDITATION, years: 3, title: '静室修行', summary: '修为增长。', cultivationGain: 300, techniqueExperience: 20, resultType: 'ordinary', importance: 1 })
     save.player!.breakthroughHistory.push({ id: 'break', year: 120, month: 1, fromRealm: '凡人', toRealm: '炼气 1层', success: true, chance: .8, result: '成功', lifespanBefore: 1200, lifespanAfter: 1800 })
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(8)
+    expect(restored.version).toBe(11)
     expect(restored.currentAction?.action).toBe(CultivationAction.MEDITATION)
     expect(restored.player!.resources.spiritHerbs).toBe(7)
     expect(restored.player!.characterStates).toEqual([CharacterState.BOTTLENECK])

@@ -1,5 +1,6 @@
 import type { LifeRecord, Player, ReincarnationSelections, ReincarnationState, TalentQuality } from '../../models'
 import { completedFateEvaluation } from '../lifeEvents/fatePath'
+import { relationshipSummary } from '../relationships/relationship'
 
 export const defaultSelections = (): ReincarnationSelections => ({ extraTalentPoints: 0, statCapBonus: 0, maxTalentQuality: '优秀', canChooseSingleRoot: false, canChooseMutatedElements: false, maxRootQuality: 'NORMAL', advancedOriginAccess: false, carryMemory: false })
 export const initialReincarnation = (): ReincarnationState => ({ totalPoints: 0, unlockedTalents: [], unlockedOrigins: [], rareEventCount: 0, rareLootCount: 0, selections: defaultSelections(), inHall: false })
@@ -67,7 +68,7 @@ export function calculateLifeEvaluation(player: Player) {
   return { score, title }
 }
 
-export function createLifeRecord(player: Player, deathYear: number, realmName: string, pointsEarned: number): LifeRecord {
+export function createLifeRecord(player: Player, deathYear: number, realmName: string, pointsEarned: number, relationships: Parameters<typeof relationshipSummary>[0] = []): LifeRecord {
   const evaluation = calculateLifeEvaluation(player)
   return {
     generation: player.generation, playerName: player.name, playerId: player.id, birthYear: player.birthYear, deathYear,
@@ -83,5 +84,8 @@ export function createLifeRecord(player: Player, deathYear: number, realmName: s
     evaluationScore: evaluation.score, evaluationTitle: evaluation.title,
     cultivationLogs: player.cultivationLogs.map((entry) => ({ ...entry })),
     breakthroughHistory: player.breakthroughHistory.map((entry) => ({ ...entry })), bodyRealm: player.bodyRealm,
+    eventRiskHistory: player.eventRiskHistory.map((entry) => ({ ...entry })), deathCause: player.deathCause ? { ...player.deathCause } : undefined,
+    dangerRecords: player.dangerRecords.map((entry) => ({ ...entry })), majorOpportunities: player.majorOpportunities.map((entry) => ({ ...entry })), inheritanceHistory: player.inheritanceHistory.map((entry) => ({ ...entry })),
+    sectMembership: player.sectMembership ? { ...player.sectMembership } : undefined, socialHistory: player.socialHistory.map((entry) => ({ ...entry })), relationshipSummary: relationshipSummary(relationships, player.id),
   }
 }

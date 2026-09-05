@@ -1,6 +1,11 @@
 import { WORLD_ERAS, WORLD_STRENGTHS, WORLD_TRAITS } from '../../data/worldTraits'
 import type { ContinentState, CultivationPathId, WorldEraId, WorldState, WorldStrengthLevel, WorldTrait } from '../../models'
 import { createSeededRandom, generateWorldSeed, hashSeed, random, type RandomService } from '../random/RandomService'
+import { generateSects } from '../sect/sectManager'
+import { initialSectRelations } from '../sect/sectRelation'
+import { generateNPCCultivator, simulateNPCCultivator } from '../npc/npcCultivator'
+import { generateTerritories, simulateTerritories } from './territories'
+import { simulateFamilies } from '../family/familyManager'
 
 const namePrefixes = ['玄', '太', '九', '天', '幽', '苍', '赤', '灵', '北', '云', '青', '紫', '沧', '星', '归']
 const nameBodies = ['苍', '虚', '霄', '玄', '冥', '莽', '霄', '墟', '荒', '梦', '岳', '渊', '澜', '辰', '元']
@@ -83,16 +88,14 @@ export function stableLegacySeed(value: unknown): string {
 
 export function createWorld(seed = generateWorldSeed(random)): WorldState {
   const normalizedSeed = seed.trim().toUpperCase() || generateWorldSeed(random)
+  const socialRandom = createSeededRandom(`${normalizedSeed}:society`)
+  const sects = generateSects(normalizedSeed)
+  const npcCultivators = sects.flatMap((sect) => Array.from({ length: 3 }, () => generateNPCCultivator(socialRandom, 100, sect)))
   return {
     seed: normalizedSeed,
     continent: generateContinent(normalizedSeed),
     currentYear: 100, currentMonth: 1, eraName: '玄历', worldEvents: [],
-    sects: [
-      { id: 'qingyun', name: '青云宗', power: 68, status: '昌盛' },
-      { id: 'sword', name: '天剑门', power: 74, status: '鼎盛' },
-      { id: 'danxia', name: '丹霞谷', power: 61, status: '安定' },
-      { id: 'blood', name: '血魔宗', power: 57, status: '蛰伏' },
-    ], npcs: [], descendants: [], families: [],
+    sects, npcs: [], npcCultivators, relationships: [], sectRelations: initialSectRelations(sects, 100), territories: generateTerritories(sects, socialRandom), masterDisciples: [], descendants: [], families: [],
   }
 }
 
@@ -119,8 +122,19 @@ export function simulateWorld(world: WorldState, months: number, rng: RandomServ
   world.worldEvents = world.worldEvents.slice(0, 100)
   for (const sect of world.sects) {
     sect.power = Math.max(10, Math.min(100, sect.power + rng.randomInt(-2, 3)))
+    sect.resources = Math.max(0, sect.resources + Math.round(months / 12 * (sect.rank + 1) - sect.members / 500))
+    sect.fame = Math.max(0, Math.min(100, sect.fame + rng.randomInt(-1, 1)))
     sect.status = sect.power > 75 ? '鼎盛' : sect.power > 55 ? '昌盛' : sect.power > 35 ? '守成' : '衰微'
   }
+  simulateTerritories(world.territories, world.sects, months, rng)
+  simulateFamilies(world.families, months)
+  for (const npc of world.npcCultivators) {
+    const wasAlive = npc.alive; const realmBefore = npc.realmIndex
+    simulateNPCCultivator(npc, months, world.currentYear + Math.floor(months / 12), rng)
+    if (wasAlive && !npc.alive) world.worldEvents.unshift({ id: crypto.randomUUID(), year: npc.deathYear ?? world.currentYear, text: `${npc.sectId ? world.sects.find((sect) => sect.id === npc.sectId)?.name ?? '某宗' : '散修'}修士${npc.name}寿尽坐化。` })
+    else if (npc.realmIndex > realmBefore && rng.chance(.12)) world.worldEvents.unshift({ id: crypto.randomUUID(), year: world.currentYear, text: `${npc.name}突破旧境，在同代修士中声名渐起。` })
+  }
+  world.worldEvents = world.worldEvents.slice(0, 100)
   for (const descendant of world.descendants) {
     if (!descendant.alive || descendant.isPlayer) continue
     descendant.ageMonths += months

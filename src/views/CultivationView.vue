@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { calculateFiveElementBalance, isFiveElementImbalanced } from '../core/aptitude/aptitude'
 import { BODY_REALM_NAMES } from '../core/actions/action'
+import { calculateBreakthroughChance } from '../core/breakthrough/breakthrough'
 import { CULTIVATION_PATHS, pathById } from '../data/cultivationPaths'
 import { techniqueById } from '../data/techniques'
 import { calculateTechniqueAffinity } from '../core/techniques/techniques'
@@ -10,7 +11,9 @@ import { useGameStore } from '../stores/game'
 
 const game = useGameStore()
 const selectedYears = ref<Partial<Record<CultivationAction, number>>>({})
-const chance = computed(() => game.breakthroughChance)
+const useAuxiliaries = ref(false)
+const useDemonicSacrifice = ref(false)
+const chance = computed(() => game.player ? calculateBreakthroughChance(game.player, game.state.world, { useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value }) : null)
 const requirements = computed(() => game.breakthroughRequirements)
 const primaryProgress = computed(() => game.player?.pathProgress.find((entry) => entry.pathId === game.player?.primaryPath))
 const selectablePrimary = computed(() => CULTIVATION_PATHS.filter((path) => path.id !== 'ghost' && game.player?.unlockedPaths.includes(path.id)))
@@ -32,6 +35,7 @@ const stateNames: Record<CharacterState, string> = {
 function duration(action: CultivationAction, fallback: number) { return selectedYears.value[action] ?? fallback }
 function chooseDuration(action: CultivationAction, years: number) { selectedYears.value[action] = years }
 function perform(action: CultivationAction, fallback: number) { game.advanceYear(action, duration(action, fallback)) }
+function attemptBreakthrough() { game.breakthrough({ useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value }) }
 function choosePrimary(pathId: CultivationPathId) { game.selectPrimaryPath(pathId) }
 function chooseSecondary(pathId: CultivationPathId) { game.selectSecondaryPath(pathId) }
 function affinity(technique: (typeof game.techniqueCatalog)[number]) {
@@ -76,8 +80,13 @@ function affinity(technique: (typeof game.techniqueCatalog)[number]) {
     </section>
 
     <section class="breakthrough panel" :class="{ available: requirements?.ready }">
-      <div><p class="eyebrow">破境关隘</p><h3>{{ requirements?.ready ? '万事俱备，可叩天关' : '尚需补足破境条件' }}</h3><p v-if="requirements && requirements.missing.length" class="missing">{{ requirements.missing.join(' · ') }}</p><p v-if="chance">基础 {{ Math.round(chance.base * 100) }}% · 灵根 {{ chance.spiritRoot >= 0 ? '+' : '' }}{{ Math.round(chance.spiritRoot * 100) }}% · 功法 {{ chance.technique >= 0 ? '+' : '' }}{{ Math.round(chance.technique * 100) }}% · 道途 {{ chance.path >= 0 ? '+' : '' }}{{ Math.round(chance.path * 100) }}% · 状态 {{ chance.state >= 0 ? '+' : '' }}{{ Math.round(chance.state * 100) }}% · 天地 {{ chance.environment >= 0 ? '+' : '' }}{{ Math.round(chance.environment * 100) }}% · 最终 <b>{{ Math.round(chance.final * 100) }}%</b></p><small v-if="requirements">功法要求 Lv.{{ requirements.requiredTechniqueLevel }} · 灵药 {{ requirements.resourceCost.spiritHerbs }} · 妖丹 {{ requirements.resourceCost.beastCores }} · 炼体材料 {{ requirements.resourceCost.bodyMaterials }} · 魂晶 {{ requirements.resourceCost.soulCrystals }}</small></div>
-      <button class="primary" :disabled="!requirements?.ready" @click="game.breakthrough()">开始突破</button>
+      <div class="breakthrough-copy"><p class="eyebrow">破境关隘</p><h3>{{ requirements?.ready ? `${game.currentRealm.name}圆满 · 尝试突破` : '修为圆满后即可尝试突破' }}</h3>
+      <p v-if="requirements && requirements.missing.length" class="missing">{{ requirements.missing.join(' · ') }}</p>
+      <div v-if="chance" class="chance-breakdown"><span>基础 <b>{{ Math.round(chance.base * 100) }}%</b></span><span>悟性 <b>{{ chance.comprehension >= 0 ? '+' : '' }}{{ Math.round(chance.comprehension * 100) }}%</b></span><span>气运 <b>{{ chance.luck >= 0 ? '+' : '' }}{{ Math.round(chance.luck * 100) }}%</b></span><span>灵根 <b>{{ chance.spiritRoot >= 0 ? '+' : '' }}{{ Math.round(chance.spiritRoot * 100) }}%</b></span><span>功法契合 <b>{{ chance.technique >= 0 ? '+' : '' }}{{ Math.round(chance.technique * 100) }}%</b></span></div>
+      <div v-if="chance" class="chance-breakdown"><span>道途 <b>{{ chance.path >= 0 ? '+' : '' }}{{ Math.round(chance.path * 100) }}%</b></span><span>天赋 <b>{{ chance.talent >= 0 ? '+' : '' }}{{ Math.round(chance.talent * 100) }}%</b></span><span>状态 <b>{{ chance.state >= 0 ? '+' : '' }}{{ Math.round(chance.state * 100) }}%</b></span><span>准备 <b>+{{ Math.round(chance.preparation * 100) }}%</b></span><span>辅助 <b>+{{ Math.round(chance.auxiliary * 100) }}%</b></span></div>
+      <div class="breakthrough-options"><label><input v-model="useAuxiliaries" type="checkbox"> 使用可用辅助物（筑基丹、灵药及道途资源）</label><label v-if="game.player.primaryPath === 'demonic'"><input v-model="useDemonicSacrifice" type="checkbox"> 血祭五年寿元与十点魔性</label></div>
+      <p v-if="chance?.aid.descriptions.length" class="aid-note">本次将消耗：{{ chance.aid.descriptions.join(' · ') }}</p><p v-else class="aid-note">辅助物不是突破门票；不投入资源也可直接尝试。</p></div>
+      <div class="breakthrough-attempt"><small>当前成功率</small><strong>{{ chance ? Math.round(chance.final * 100) : 0 }}%</strong><button class="primary" :disabled="!requirements?.ready" @click="attemptBreakthrough">突破</button></div>
     </section>
 
     <section v-if="game.player.cultivationLogs.length" class="panel cultivation-logs">
@@ -99,4 +108,5 @@ function affinity(technique: (typeof game.techniqueCatalog)[number]) {
 .focus-copy{min-width:260px;flex:1}.focus-details{display:grid;grid-template-columns:repeat(2,minmax(150px,1fr));gap:10px 20px;margin:0}.focus-details div{padding:10px 12px;border-left:2px solid rgba(200,164,91,.35)}.focus-details dt,.resource-grid span{font-size:.78rem;color:var(--muted)}.focus-details dd{margin:4px 0 0}.action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.action-card{display:flex;flex-direction:column;padding:16px;border:1px solid rgba(200,164,91,.24);background:rgba(14,20,18,.34)}.action-card header{display:flex;gap:12px;align-items:flex-start}.action-card header>span{display:grid;place-items:center;width:42px;height:42px;border:1px solid #a98545;border-radius:50%;color:#e0bd70;font-family:serif;font-size:1.15rem}.action-card h4{margin:0 0 5px}.action-card p{margin:0;color:var(--muted);font-size:.86rem;line-height:1.55}.duration-options{display:flex;gap:6px;margin:16px 0 10px}.duration-options button{flex:1;padding:6px;background:transparent;border:1px solid rgba(200,164,91,.25);color:var(--muted)}.duration-options button.active{border-color:#d4ae62;color:#f2d18b;background:rgba(187,139,51,.14)}.action-submit{width:100%;margin-top:auto}.action-warning,.missing{color:#d99a7c}.resource-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.resource-grid div{padding:12px;text-align:center;border:1px solid rgba(200,164,91,.18)}.resource-grid b{display:block;margin-top:5px;color:#e2c178;font-size:1.2rem}.cultivation-logs ol{list-style:none;margin:0;padding:0}.cultivation-logs li{display:grid;grid-template-columns:110px 1fr;gap:16px;padding:12px 0;border-bottom:1px solid rgba(200,164,91,.14)}.cultivation-logs time{color:#c9a55d}.cultivation-logs p{margin:4px 0 0;color:var(--muted)}
 @media(max-width:900px){.action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.focus-details{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:600px){.action-grid{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(2,1fr)}.cultivation-logs li{grid-template-columns:1fr;gap:4px}}
+.breakthrough-copy{flex:1}.chance-breakdown{display:grid;grid-template-columns:repeat(5,minmax(86px,1fr));gap:7px;margin:10px 0}.chance-breakdown span{padding:8px;border:1px solid rgba(200,164,91,.16);color:var(--muted);font-size:.78rem}.chance-breakdown b{display:block;margin-top:3px;color:#e2c178}.breakthrough-options{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px}.breakthrough-options label{cursor:pointer;color:var(--muted);font-size:.86rem}.aid-note{margin:8px 0 0;color:#bcae91;font-size:.82rem}.breakthrough-attempt{min-width:120px;text-align:center}.breakthrough-attempt small{display:block;color:var(--muted)}.breakthrough-attempt strong{display:block;margin:4px 0 10px;color:#e6c575;font-size:2rem}
 </style>

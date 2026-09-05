@@ -2,6 +2,7 @@ import type { LifeEvent, Player, WorldState } from '../../models'
 import { LIFE_EVENTS } from '../../data/lifeEvents'
 import type { RandomService } from '../random/RandomService'
 import { determineLifeStage, meetsEventCondition } from './eventCondition'
+import { opportunityWeightMultiplier } from './eventRisk'
 
 export function isLifeEventOnCooldown(event: LifeEvent, player: Player, currentYear: number) {
   const previous = [...player.lifeEventHistory].reverse().find((record) => record.eventId === event.id)
@@ -24,7 +25,10 @@ export function calculateLifeEventWeight(event: LifeEvent, player: Player, world
   }
   const formedDestiny = player.fatePaths.some((entry) => entry.status === 'completed' && fatePathTags[entry.id]?.some((tag) => event.tags.includes(tag))) ? 1.35 : 1
   const worldMatch = event.tags.some((tag) => world.continent.traits.some((trait) => tag === `world:${trait.id}`)) ? 1.3 : 1
-  return Number((event.weight * luck * insight * root * talent * fate * path * formedDestiny * worldMatch).toFixed(3))
+  const dangerWorld = event.riskLevel >= 2 ? world.continent.cultivationEnvironment.dangerMultiplier : 1
+  const opportunity = opportunityWeightMultiplier(event, player)
+  const traitAffinity = event.tags.includes('beast') && world.continent.traits.some((trait) => trait.id === 'beasts') ? 1.65 : event.tags.includes('demonic') && world.continent.traits.some((trait) => trait.id === 'demonic-rise') ? 1.65 : event.tags.includes('inheritance') && world.continent.traits.some((trait) => trait.id === 'ancient-ruins') ? 1.5 : 1
+  return Number((event.weight * luck * insight * root * talent * fate * path * formedDestiny * worldMatch * dangerWorld * opportunity * traitAffinity).toFixed(3))
 }
 
 export interface WeightedLifeEvent { event: LifeEvent; weight: number }

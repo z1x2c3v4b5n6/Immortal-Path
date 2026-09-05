@@ -107,7 +107,7 @@ function legacySave(version: number, spiritRoot: Record<string, unknown>, reinca
 describe('V4 spirit-root migration', () => {
   it('migrates a V3 dual root and old permissions to the new fields', () => {
     const save = migrateSave(legacySave(3, { name: '水木双灵根', rank: 4, multiplier: 1.22, elements: ['水', '木'] }, { rareEventCount: 4, selections: { maxRootRank: 7 } }))
-    expect(save.version).toBe(8)
+    expect(save.version).toBe(11)
     expect(save.player?.spiritRoot).toMatchObject({ elements: ['水', '木'], quality: 'NORMAL', cultivationMultiplier: 1.10, specializationMultiplier: 1.22, breakthroughModifier: .025, statPointBonus: 5 })
     expect(save.reincarnation.rareEventCount).toBe(0)
     expect(save.reincarnation.rareLootCount).toBe(4)

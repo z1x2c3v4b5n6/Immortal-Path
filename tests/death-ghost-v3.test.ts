@@ -5,7 +5,7 @@ import { descendantFixture, playerFixture, saveFixture, worldFixture } from './f
 import type { FamilyState, Player } from '../src/models'
 
 function familyFor(player: Player): FamilyState {
-  return { id: player.familyId, name: player.bloodline.familyName, founderId: player.id, foundedYear: 100, wealth: 0, inventory: [], reputation: 0, bloodline: player.bloodline, memberIds: [player.id] }
+  return { id: player.familyId, name: player.bloodline.familyName, founderId: player.id, foundedYear: 100, wealth: 0, inventory: [], reputation: 0, bloodline: player.bloodline, memberIds: [player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [] }
 }
 
 function setupMortal() {

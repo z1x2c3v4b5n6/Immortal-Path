@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import type { EventOption } from '../models'
 import { useGameStore } from '../stores/game'
+import { riskLevelName, riskStars } from '../core/lifeEvents/eventRisk'
+import { REALMS } from '../data/realms'
 
 const game = useGameStore()
 const event = computed(() => game.pendingEvent)
@@ -18,13 +20,14 @@ function allowed(option: EventOption) {
 
 <template>
   <div class="modal-backdrop">
-    <section class="event-modal">
+    <section class="event-modal" :class="{ 'high-risk-event': lifeEvent && lifeEvent.riskLevel >= 3 }">
       <template v-if="showingResult">
         <div class="event-glyph">果</div><p class="eyebrow">因果已定</p><h2>{{ game.ready.eventResultTitle }}</h2><p class="event-copy">{{ game.ready.eventResultText }}</p>
         <button class="button" @click="game.closeEventResult">收下此念</button>
       </template>
       <template v-else-if="lifeEvent">
         <div class="event-glyph">命</div><p class="eyebrow">人生抉择 · 重要度 {{ lifeEvent.importance }}</p><h2>{{ lifeEvent.name }}</h2><p class="event-copy">{{ lifeEvent.description }}</p>
+        <div class="risk-warning" :class="`risk-${lifeEvent.riskLevel}`"><b>危险等级：{{ riskStars(lifeEvent.riskLevel) }} · {{ riskLevelName(lifeEvent.riskLevel) }}</b><span>可能奖励：未知</span><small v-if="lifeEvent.recommendedRealmIndex !== undefined">建议 {{ REALMS[lifeEvent.recommendedRealmIndex]?.name ?? '更高境界' }} 以上修士介入。最终选择权在你。</small><small v-else-if="lifeEvent.riskLevel >= 3">此事可能重伤甚至致命，请谨慎选择。</small></div>
         <div class="event-options">
           <button v-for="(choice, index) in lifeEvent.choices" :key="choice.id" @click="game.chooseLifeEvent(choice.id)">
             <span>{{ ['壹', '贰', '叁'][index] }}</span><b>{{ choice.label }}</b><small>{{ choice.description || '此念既出，因果自生' }}</small>

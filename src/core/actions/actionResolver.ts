@@ -146,7 +146,8 @@ export function resolveCultivationAction(player: Player, world: WorldState, acti
 }
 
 export function createCultivationLog(result: ActionResolution, year: number, month: number): CultivationLog {
-  return { id: `${year}-${month}-${result.action}-${Math.random().toString(36).slice(2, 7)}`, year, month, action: result.action, years: result.years, title: result.title, summary: result.summary, cultivationGain: result.cultivationGain, techniqueExperience: result.techniqueExperience, resultType: result.resultType }
+  const importance: CultivationLog['importance'] = result.resultType === 'danger' || result.resultType === 'inner-demon' || result.resultType === 'technique-breakthrough' || result.title.startsWith('肉身突破') ? 3 : result.resultType === 'insight' || result.resultType === 'bottleneck' ? 2 : 1
+  return { id: `${year}-${month}-${result.action}-${Math.random().toString(36).slice(2, 7)}`, year, month, action: result.action, years: result.years, title: result.title, summary: result.summary, cultivationGain: result.cultivationGain, techniqueExperience: result.techniqueExperience, resultType: result.resultType, importance }
 }
 
 export const advanceYear = resolveCultivationAction

@@ -210,7 +210,7 @@ describe('V3.1 acquired talents and reincarnation', () => {
   it('records acquired talents in the chronicle and unlocks their reincarnation consequence only on final death', () => {
     const player = playerFixture({ alive: false, acquiredTalents: [{ talentId: 'five-unity', name: '五行归一', acquiredYear: 120, acquiredMonth: 1, source: '修行积累' }] })
     const game = useGameStore()
-    game.replaceState(saveFixture({ player, world: worldFixture({ families: [{ id: player.familyId, name: '沈氏', founderId: player.id, foundedYear: 84, wealth: 0, inventory: [], reputation: 0, bloodline: player.bloodline, memberIds: [player.id] }] }) }))
+    game.replaceState(saveFixture({ player, world: worldFixture({ families: [{ id: player.familyId, name: '沈氏', founderId: player.id, foundedYear: 84, wealth: 0, inventory: [], reputation: 0, bloodline: player.bloodline, memberIds: [player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [] }] }) }))
     expect(game.state.reincarnation.unlockedTalents).not.toContain('five-element-seed')
     expect(game.finalizeMortalDeath()).toBe(true)
     expect(game.state.lifeRecords[0].acquiredTalents[0].talentId).toBe('five-unity')
@@ -223,7 +223,7 @@ describe('V3.1 fields through current save migration', () => {
     const legacy = saveFixture({ version })
     const { spiritualAptitude: _aptitude, acquiredTalents: _talents, knownTechniques: _known, techniqueProgress: _progress, ...legacyPlayer } = legacy.player!
     const migrated = migrateSave({ ...legacy, player: legacyPlayer })
-    expect(migrated.version).toBe(8)
+    expect(migrated.version).toBe(11)
     expect(migrated.player?.spiritualAptitude.innateRoot).toMatchObject({ elements: ['水', '木'] })
     expect(migrated.player?.acquiredTalents).toEqual([])
     expect(migrated.player?.knownTechniques).toContain('plain-breath')

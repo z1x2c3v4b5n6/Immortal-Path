@@ -2,7 +2,7 @@ import { originById } from '../../data/origins'
 import { CREATION_CONFIG } from '../../data/creationConfig'
 import { createSpiritRoot, MUTATED_ELEMENTS, STANDARD_ELEMENTS } from '../../data/spiritRoots'
 import { instantiateTalent, talentById } from '../../data/talents'
-import { BodyRealm, CharacterState, CultivationAction, type AcquiredSpiritRoot, type CultivationPathId, type CultivationPathProgress, type Descendant, type EntryType, type GameSave, type LifeRecord, type Player, type PlayerStats, type ReincarnationState, type SpiritElement, type SpiritRoot, type SpiritRootQuality, type TalentDefinition, type TalentInstance, type TechniqueProgress, type WorldState } from '../../models'
+import { BodyRealm, CharacterState, CultivationAction, type AcquiredSpiritRoot, type CultivationPathId, type CultivationPathProgress, type Descendant, type EntryType, type FamilyState, type GameSave, type LifeRecord, type NPCCultivator, type Player, type PlayerStats, type ReincarnationState, type Sect, type SpiritElement, type SpiritRoot, type SpiritRootQuality, type TalentDefinition, type TalentInstance, type TechniqueProgress, type WorldState } from '../../models'
 import { initialReincarnation } from '../reincarnation/reincarnation'
 import { createWorld, generateContinent, stableLegacySeed } from '../world/world'
 import { initialPathResources } from '../paths/paths'
@@ -10,8 +10,11 @@ import { calculateMaxLifespanMonths } from '../lifespan/lifespan'
 import { ALL_SPIRIT_ELEMENTS, createSpiritualAptitude } from '../aptitude/aptitude'
 import { initialCultivationResources } from '../actions/actionEffects'
 import { BODY_REALM_ORDER } from '../actions/action'
+import { initialSectRelations } from '../sect/sectRelation'
+import { generateTerritories } from '../world/territories'
+import { createSeededRandom } from '../random/RandomService'
 
-export const CURRENT_SAVE_VERSION = 8
+export const CURRENT_SAVE_VERSION = 11
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
 
@@ -92,6 +95,42 @@ function migrateTalents(value: unknown, generation: number): TalentInstance[] {
       ],
     } satisfies TalentDefinition)
     return instantiateTalent(definition, generation)
+  })
+}
+
+function migrateCultivationLogs(value: unknown): Player['cultivationLogs'] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    const old = record(entry)
+    const resultType = typeof old.resultType === 'string' ? old.resultType : 'ordinary'
+    const importance = typeof old.importance === 'number' && old.importance >= 1 && old.importance <= 4
+      ? old.importance as 1 | 2 | 3 | 4
+      : resultType === 'danger' || resultType === 'inner-demon' || resultType === 'technique-breakthrough' ? 3 : resultType === 'insight' || resultType === 'bottleneck' ? 2 : 1
+    return { ...(old as unknown as Player['cultivationLogs'][number]), importance }
+  })
+}
+
+function migrateSects(value: unknown, defaults: Sect[]): Sect[] {
+  if (!Array.isArray(value) || !value.length) return defaults
+  return value.map((entry, index) => {
+    const old = record(entry); const fallback = defaults[index % defaults.length]
+    return { ...fallback, ...(old as Partial<Sect>), id: typeof old.id === 'string' ? old.id : fallback.id, name: typeof old.name === 'string' ? old.name : fallback.name, power: typeof old.power === 'number' ? old.power : fallback.power, status: typeof old.status === 'string' ? old.status : fallback.status, techniqueIds: Array.isArray(old.techniqueIds) ? old.techniqueIds.filter((id): id is string => typeof id === 'string') : fallback.techniqueIds }
+  })
+}
+
+function migrateFamilies(value: unknown): FamilyState[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry) => {
+    const old = record(entry)
+    return { ...(old as unknown as FamilyState), kind: old.kind === '修仙家族' || old.kind === '玩家家族' ? old.kind : '凡人家族', resources: typeof old.resources === 'number' ? old.resources : typeof old.wealth === 'number' ? Math.floor(old.wealth / 2) : 0, fame: typeof old.fame === 'number' ? old.fame : typeof old.reputation === 'number' ? old.reputation : 0, territory: typeof old.territory === 'string' ? old.territory : '故乡村镇', history: Array.isArray(old.history) ? old.history as FamilyState['history'] : [] }
+  })
+}
+
+function migrateNPCCultivators(value: unknown): NPCCultivator[] {
+  if (!Array.isArray(value)) return []
+  return value.map((entry, index) => {
+    const old = record(entry); const realmIndex = typeof old.realmIndex === 'number' ? old.realmIndex : 0
+    return { ...(old as unknown as NPCCultivator), id: typeof old.id === 'string' ? old.id : `legacy-npc-${index}`, name: typeof old.name === 'string' ? old.name : `旧世修士${index + 1}`, ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 20 * 12, lifespanMonths: typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 100 * 12, realmIndex, cultivation: typeof old.cultivation === 'number' ? old.cultivation : 0, spiritRoot: migrateRoot(old.spiritRoot), path: ['dao', 'sword', 'body', 'demonic', 'ghost'].includes(String(old.path)) ? old.path as CultivationPathId : 'dao', talents: Array.isArray(old.talents) ? old.talents.filter((item): item is string => typeof item === 'string') : [], personality: typeof old.personality === 'string' ? old.personality : '沉稳', alive: old.alive !== false, generation: typeof old.generation === 'number' ? old.generation : 1 }
   })
 }
 
@@ -177,13 +216,22 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
     fatePaths: Array.isArray(old.fatePaths) ? old.fatePaths as Player['fatePaths'] : [],
     lifeTimeline: Array.isArray(old.lifeTimeline) ? old.lifeTimeline as Player['lifeTimeline'] : [],
     importantEvents: Array.isArray(old.importantEvents) ? old.importantEvents as Player['importantEvents'] : [],
-    cultivationLogs: Array.isArray(old.cultivationLogs) ? old.cultivationLogs as Player['cultivationLogs'] : [],
+    cultivationLogs: migrateCultivationLogs(old.cultivationLogs),
     resources: { ...initialCultivationResources(), ...Object.fromEntries(Object.entries(record(old.resources)).filter(([, entry]) => typeof entry === 'number')) } as Player['resources'],
     characterStates: Array.isArray(old.characterStates) ? old.characterStates.filter((entry): entry is CharacterState => Object.values(CharacterState).includes(entry as CharacterState)) : [CharacterState.NORMAL],
     breakthroughHistory: Array.isArray(old.breakthroughHistory) ? old.breakthroughHistory as Player['breakthroughHistory'] : [],
     breakthroughProgress: typeof old.breakthroughProgress === 'number' ? Math.max(0, Math.min(100, old.breakthroughProgress)) : (typeof old.cultivation === 'number' && typeof old.cultivationRequired === 'number' && old.cultivation >= old.cultivationRequired ? 100 : 0),
     bodyRealm: Object.values(BodyRealm).includes(old.bodyRealm as BodyRealm) ? old.bodyRealm as BodyRealm : BODY_REALM_ORDER[Math.max(0, Math.min(5, typeof oldResources.bodyStage === 'number' ? oldResources.bodyStage : 0))],
     bodyTrainingProgress: typeof old.bodyTrainingProgress === 'number' ? Math.max(0, old.bodyTrainingProgress) : [0, 100, 250, 450, 700, 1000][Math.max(0, Math.min(5, typeof oldResources.bodyStage === 'number' ? oldResources.bodyStage : 0))],
+    eventRiskHistory: Array.isArray(old.eventRiskHistory) ? old.eventRiskHistory as Player['eventRiskHistory'] : [],
+    deathCause: old.deathCause && typeof old.deathCause === 'object' ? old.deathCause as Player['deathCause'] : typeof old.causeOfDeath === 'string' ? { category: old.causeOfDeath.includes('寿元') ? 'lifespan' : old.causeOfDeath.includes('魂飞魄散') ? 'soul-dispersal' : 'adventure', description: old.causeOfDeath } : undefined,
+    dangerRecords: Array.isArray(old.dangerRecords) ? old.dangerRecords as Player['dangerRecords'] : [],
+    majorOpportunities: Array.isArray(old.majorOpportunities) ? old.majorOpportunities as Player['majorOpportunities'] : [],
+    inheritanceHistory: Array.isArray(old.inheritanceHistory) ? old.inheritanceHistory as Player['inheritanceHistory'] : [],
+    sectMembership: old.sectMembership && typeof old.sectMembership === 'object' ? old.sectMembership as Player['sectMembership'] : undefined,
+    masterId: typeof old.masterId === 'string' ? old.masterId : undefined,
+    discipleIds: Array.isArray(old.discipleIds) ? old.discipleIds.filter((entry): entry is string => typeof entry === 'string') : [],
+    socialHistory: Array.isArray(old.socialHistory) ? old.socialHistory as Player['socialHistory'] : [],
   }
   if (!player.unlockedPaths.length) player.unlockedPaths = ['dao', 'sword', 'body']
   if (!player.characterStates.length) player.characterStates = [CharacterState.NORMAL]
@@ -212,9 +260,17 @@ function migrateLifeRecords(value: unknown): LifeRecord[] {
       importantEvents: Array.isArray(old.importantEvents) ? old.importantEvents as LifeRecord['importantEvents'] : [],
       evaluationScore: typeof old.evaluationScore === 'number' ? old.evaluationScore : 0,
       evaluationTitle: typeof old.evaluationTitle === 'string' ? old.evaluationTitle : '平凡一生',
-      cultivationLogs: Array.isArray(old.cultivationLogs) ? old.cultivationLogs as LifeRecord['cultivationLogs'] : [],
+      cultivationLogs: migrateCultivationLogs(old.cultivationLogs),
       breakthroughHistory: Array.isArray(old.breakthroughHistory) ? old.breakthroughHistory as LifeRecord['breakthroughHistory'] : [],
       bodyRealm: Object.values(BodyRealm).includes(old.bodyRealm as BodyRealm) ? old.bodyRealm as BodyRealm : BodyRealm.SKIN,
+      eventRiskHistory: Array.isArray(old.eventRiskHistory) ? old.eventRiskHistory as LifeRecord['eventRiskHistory'] : [],
+      deathCause: old.deathCause && typeof old.deathCause === 'object' ? old.deathCause as LifeRecord['deathCause'] : undefined,
+      dangerRecords: Array.isArray(old.dangerRecords) ? old.dangerRecords as LifeRecord['dangerRecords'] : [],
+      majorOpportunities: Array.isArray(old.majorOpportunities) ? old.majorOpportunities as LifeRecord['majorOpportunities'] : [],
+      inheritanceHistory: Array.isArray(old.inheritanceHistory) ? old.inheritanceHistory as LifeRecord['inheritanceHistory'] : [],
+      sectMembership: old.sectMembership && typeof old.sectMembership === 'object' ? old.sectMembership as LifeRecord['sectMembership'] : undefined,
+      socialHistory: Array.isArray(old.socialHistory) ? old.socialHistory as LifeRecord['socialHistory'] : [],
+      relationshipSummary: old.relationshipSummary && typeof old.relationshipSummary === 'object' ? old.relationshipSummary as LifeRecord['relationshipSummary'] : { friends: 0, rivals: 0, enemies: 0, disciples: 0 },
     }
   })
 }
@@ -225,15 +281,24 @@ export function migrateSave(value: unknown): GameSave {
   const oldWorld = record(old.world)
   const seed = typeof oldWorld.seed === 'string' && oldWorld.seed.trim() ? oldWorld.seed.trim().toUpperCase() : stableLegacySeed(oldWorld)
   const baseWorld = createWorld(seed)
+  const sects = migrateSects(oldWorld.sects, baseWorld.sects)
+  const migrationRandom = createSeededRandom(`${seed}:v11-migration`)
+  const migrationYear = typeof oldWorld.currentYear === 'number' ? oldWorld.currentYear : baseWorld.currentYear
+  const npcSource = Array.isArray(oldWorld.npcCultivators) ? oldWorld.npcCultivators : Array.isArray(oldWorld.npcs) && oldWorld.npcs.length ? oldWorld.npcs : baseWorld.npcCultivators
   const world: WorldState = {
     ...baseWorld, ...(oldWorld as Partial<WorldState>),
     seed,
     continent: oldWorld.continent && typeof oldWorld.continent === 'object' ? oldWorld.continent as WorldState['continent'] : generateContinent(seed),
     worldEvents: Array.isArray(oldWorld.worldEvents) ? oldWorld.worldEvents as WorldState['worldEvents'] : [],
-    sects: Array.isArray(oldWorld.sects) ? oldWorld.sects as WorldState['sects'] : baseWorld.sects,
+    sects,
     npcs: Array.isArray(oldWorld.npcs) ? oldWorld.npcs as WorldState['npcs'] : [],
+    npcCultivators: migrateNPCCultivators(npcSource),
+    relationships: Array.isArray(oldWorld.relationships) ? oldWorld.relationships as WorldState['relationships'] : [],
+    sectRelations: Array.isArray(oldWorld.sectRelations) ? oldWorld.sectRelations as WorldState['sectRelations'] : initialSectRelations(sects, migrationYear),
+    territories: Array.isArray(oldWorld.territories) ? oldWorld.territories as WorldState['territories'] : generateTerritories(sects, migrationRandom),
+    masterDisciples: Array.isArray(oldWorld.masterDisciples) ? oldWorld.masterDisciples as WorldState['masterDisciples'] : [],
     descendants: migrateDescendants(oldWorld.descendants),
-    families: Array.isArray(oldWorld.families) ? oldWorld.families as WorldState['families'] : [],
+    families: migrateFamilies(oldWorld.families),
   }
   const now = new Date().toISOString()
   const save: GameSave = {
@@ -247,7 +312,7 @@ export function migrateSave(value: unknown): GameSave {
     currentAction: old.currentAction && typeof old.currentAction === 'object' && Object.values(CultivationAction).includes(record(old.currentAction).action as CultivationAction) ? old.currentAction as GameSave['currentAction'] : null,
   }
   if (save.player && !save.world.families.some((family) => family.id === save.player!.familyId)) {
-    save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id] })
+    save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [] })
   }
   return save
 }

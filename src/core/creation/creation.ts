@@ -147,6 +147,7 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
     lifeEventHistory: [], fateTags: [], fatePaths: [], lifeTimeline: [], importantEvents: [],
     cultivationLogs: [], resources: initialCultivationResources(), characterStates: [CharacterState.NORMAL], breakthroughHistory: [], breakthroughProgress: 0,
     bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
+    eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
   }
   player.lifespanMonths = calculateMaxLifespanMonths(player)
   return player

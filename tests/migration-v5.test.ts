@@ -19,9 +19,9 @@ function legacySave(version: number) {
 }
 
 describe('complete legacy migration chain', () => {
-  it.each([1, 2, 3, 4, 5])('migrates V%i to V8 with stable world and path defaults', (version) => {
+  it.each([1, 2, 3, 4, 5])('migrates V%i to V11 with stable world and path defaults', (version) => {
     const migrated = migrateSave(legacySave(version))
-    expect(migrated.version).toBe(8)
+    expect(migrated.version).toBe(11)
     expect(migrated.world.seed).toMatch(/^LG-/)
     expect(migrated.world.continent.traits.length).toBeGreaterThanOrEqual(3)
     expect(migrated.player?.pathResources.maxQiBlood).toBe(100)
@@ -42,7 +42,7 @@ describe('complete legacy migration chain', () => {
     save.player!.pathProgress = [{ pathId: 'sword', experience: 240, level: 2 }]
     save.player!.pathResources.swordIntent = 88
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(8)
+    expect(restored.version).toBe(11)
     expect(restored.world.seed).toBe(save.world.seed)
     expect(restored.world.continent).toEqual(save.world.continent)
     expect(restored.player?.primaryPath).toBe('sword')

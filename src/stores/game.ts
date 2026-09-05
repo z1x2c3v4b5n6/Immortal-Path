@@ -1,6 +1,6 @@
 import { computed, reactive } from 'vue'
 import { defineStore } from 'pinia'
-import { calculateBreakthroughChance, canBreakthrough, checkBreakthroughRequirements, consumeBreakthroughResources } from '../core/breakthrough/breakthrough'
+import { calculateBreakthroughChance, canBreakthrough, checkBreakthroughRequirements, consumeBreakthroughAid, type BreakthroughOptions } from '../core/breakthrough/breakthrough'
 import { createPlayerFromBuild, generateDescendant } from '../core/creation/creation'
 import { calculateCultivationGain } from '../core/cultivation/cultivation'
 import { selectEventOutcome } from '../core/events/outcomes'
@@ -31,10 +31,17 @@ import { checkLifeEvents, selectLifeEvent } from '../core/lifeEvents/eventResolv
 import { resolveLifeEventChoice } from '../core/lifeEvents/eventOutcome'
 import { addFateTag, addLifeTimelineEntry, createLifeTimelineEntry, recordLifeEvent, removeFateTag } from '../core/lifeEvents/eventHistory'
 import { evaluateFatePaths } from '../core/lifeEvents/fatePath'
+import { calculateEventRisk, eventDeathCategory, resolveEventRisk, type RiskOutcome } from '../core/lifeEvents/eventRisk'
 import { createCultivationLog, resolveCultivationAction } from '../core/actions/actionResolver'
 import { CULTIVATION_ACTIONS } from '../core/actions/action'
-import { addCharacterState, initialCultivationResources, normalizeCharacterStates, removeCharacterState } from '../core/actions/actionEffects'
-import { BodyRealm, CharacterState, CultivationAction, type ActionResultType, type CharacterBuild, type CultivationPathId, type EventEffect, type FamilyState, type GameSave, type InventoryItem, type LifeEventEffect, type LifeTimelineEntry, type LogEntry, type Player, type SpiritElement, type StatKey, type TimelineEvent, type WorldEraId, type WorldStrengthLevel } from '../models'
+import { addCharacterState, initialCultivationResources, lifeEventStateMultiplier, normalizeCharacterStates, removeCharacterState } from '../core/actions/actionEffects'
+import { BodyRealm, CharacterState, CultivationAction, type ActionResultType, type CharacterBuild, type CultivationPathId, type EventEffect, type FamilyState, type GameSave, type InventoryItem, type LifeEventEffect, type LifeTimelineEntry, type LogEntry, type Player, type RelationshipType, type SpiritElement, type StatKey, type TimelineEvent, type WorldEraId, type WorldStrengthLevel } from '../models'
+import { addSectContribution, canAccessSectTechnique, canJoinSect, createSect, joinSect as admitToSect, sectStipend, techniqueContributionCost, updateSectPosition } from '../core/sect/sectManager'
+import { sectById } from '../core/sect/sectRepository'
+import { changeSectRelation } from '../core/sect/sectRelation'
+import { generateNPCCultivator, generateSectCohort, simulateNPCCultivator } from '../core/npc/npcCultivator'
+import { relationshipBetween, setRelationship } from '../core/relationships/relationship'
+import { inheritFamilyLegacy, promoteCultivationFamily } from '../core/family/family'
 
 function emptySave(): GameSave {
   const now = new Date().toISOString()
@@ -69,6 +76,8 @@ export const useGameStore = defineStore('game', () => {
   const breakthroughRequirements = computed(() => state.player ? checkBreakthroughRequirements(state.player) : null)
   const pendingEvent = computed(() => state.pendingEvent ? eventById(state.pendingEvent.eventId) : undefined)
   const pendingLifeEvent = computed(() => state.pendingLifeEvent ? lifeEventById(state.pendingLifeEvent.eventId) : undefined)
+  const currentSect = computed(() => sectById(state.world.sects, state.player?.sectMembership?.sectId))
+  const sectPeers = computed(() => state.player?.sectMembership ? state.world.npcCultivators.filter((npc) => npc.sectId === state.player!.sectMembership!.sectId && npc.alive).sort((a, b) => b.realmIndex - a.realmIndex) : [])
   const ageYears = computed(() => Math.floor((state.player?.ageMonths ?? 0) / 12))
   const remainingYears = computed(() => Math.max(0, Math.ceil(((state.player?.lifespanMonths ?? 0) - (state.player?.ageMonths ?? 0)) / 12)))
   const agingStatus = computed(() => state.player ? agingStage(state.player) : '壮年')
@@ -86,6 +95,12 @@ export const useGameStore = defineStore('game', () => {
   function recordLifeMoment(text: string, type: LifeTimelineEntry['type'], importance: LifeTimelineEntry['importance']) {
     if (!state.player) return
     addLifeTimelineEntry(state.player, createLifeTimelineEntry(state.player, state.world.currentYear, state.world.currentMonth, text, type, importance))
+  }
+  function recordSocialMoment(text: string, type: Player['socialHistory'][number]['type'], important = false) {
+    if (!state.player) return
+    state.player.socialHistory.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text, type })
+    timeline(text, important ? 'realm' : 'life')
+    if (important) recordLifeMoment(text, 'event', 3)
   }
   function refreshFatePaths() {
     if (!state.player) return []
@@ -117,7 +132,7 @@ export const useGameStore = defineStore('game', () => {
   function createFamily(current: Player): FamilyState {
     return {
       id: current.familyId, name: current.bloodline.familyName, founderId: current.id, foundedYear: state.world.currentYear,
-      wealth: 0, inventory: [], reputation: 0, bloodline: current.bloodline, memberIds: [current.id],
+      wealth: 0, inventory: [], reputation: 0, bloodline: current.bloodline, memberIds: [current.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [],
     }
   }
 
@@ -156,8 +171,8 @@ export const useGameStore = defineStore('game', () => {
 
   function checkDeath() {
     if (!state.player?.alive) return true
-    if (isSoulDispersed(state.player)) { die('魂体稳定耗尽，魂飞魄散'); return true }
-    if (isNaturalLifespanExpired(state.player)) { die('寿元耗尽'); return true }
+    if (isSoulDispersed(state.player)) { die('魂体稳定耗尽，魂飞魄散', { category: 'soul-dispersal', description: '魂体稳定耗尽，魂飞魄散' }); return true }
+    if (isNaturalLifespanExpired(state.player)) { die('寿元耗尽', { category: 'lifespan', description: '寿元耗尽' }); return true }
     return false
   }
 
@@ -192,8 +207,17 @@ export const useGameStore = defineStore('game', () => {
     if (!state.player?.alive) return
     const ageBefore = Math.floor(state.player.ageMonths / 12)
     simulateWorld(state.world, months, random)
+    const masterLink = state.world.masterDisciples.find((entry) => entry.discipleId === state.player!.id && entry.status === 'active')
+    const master = masterLink && state.world.npcCultivators.find((entry) => entry.id === masterLink.masterId)
+    if (masterLink && master && !master.alive) { masterLink.status = 'ended'; recordSocialMoment(`师父${master.name}寿尽坐化，师徒缘分止于此年。`, 'relationship', true) }
     addMonths(state.world, months)
     state.player.ageMonths += months
+    const sect = sectById(state.world.sects, state.player.sectMembership?.sectId)
+    if (sect && months >= 12) {
+      const stipend = sectStipend(state.player, sect, months / 12)
+      state.player.spiritStones += stipend
+      if (stipend) timeline(`领取${sect.name}${state.player.sectMembership?.position}年俸 ${stipend} 枚灵石。`, 'loot')
+    }
     const ageAfter = Math.floor(state.player.ageMonths / 12)
     if (state.player.primaryPath === 'ghost') {
       state.player.soulStability = Math.max(0, (state.player.soulStability ?? 80) - months / 18)
@@ -239,15 +263,22 @@ export const useGameStore = defineStore('game', () => {
     const log = createCultivationLog(result, state.world.currentYear, state.world.currentMonth)
     current.cultivationLogs.unshift(log)
     current.cultivationLogs.splice(200)
+    if (log.importance >= 3) recordLifeMoment(`${result.title}：${result.summary}`, result.resultType === 'danger' || result.resultType === 'inner-demon' ? 'danger' : 'inheritance', log.importance)
     timeline(`${result.title}：${result.summary}`, result.resultType === 'danger' || result.resultType === 'inner-demon' ? 'event' : 'life')
     advanceTime(result.years * 12)
+    if (current.alive && result.resultType === 'inner-demon' && current.pathResources.innerDemon >= 90 && random.chance(.08 + current.pathResources.innerDemon * .0012)) {
+      const cause = '闭关时心魔失控，道心崩毁而亡'
+      recordLifeMoment(cause, 'death', 4)
+      die(cause, { category: 'inner-demon', description: cause })
+    }
     if (current.alive) {
       const insightEvent = action === CultivationAction.ENLIGHTENMENT
         ? current.spiritualAptitude.innateRoot.elements.length === 5 ? 'five-unity-insight' : current.primaryPath === 'sword' ? 'sword-heart-insight' : current.primaryPath === 'demonic' ? 'demon-heart-trial' : undefined
         : undefined
       unlockAcquiredTalents(insightEvent)
       refreshFatePaths()
-      if (!state.pendingEvent && !state.pendingLifeEvent && random.chance(result.lifeEventChance)) triggerLifeEvent()
+      const eventChance = Math.min(.95, result.lifeEventChance * lifeEventStateMultiplier(current) * state.world.continent.cultivationEnvironment.eventFrequencyMultiplier)
+      if (!state.pendingEvent && !state.pendingLifeEvent && random.chance(eventChance)) triggerLifeEvent()
     }
     state.currentAction = null
     scheduleSave()
@@ -306,6 +337,83 @@ export const useGameStore = defineStore('game', () => {
   function addItem(itemId: string, quantity = 1) {
     if (!state.player) return
     mergeInventory(state.player.inventory, [{ itemId, quantity }])
+  }
+
+  function joinPlayerSect(sectId: string) {
+    const current = state.player
+    const sect = sectById(state.world.sects, sectId)
+    if (!current || !sect || !canJoinSect(current, sect)) return false
+    const membership = admitToSect(current, sect, state.world.currentYear)
+    if (!membership) return false
+    const cohort = generateSectCohort(random, state.world.currentYear, sect)
+    state.world.npcCultivators.push(...cohort)
+    cohort.slice(0, 3).forEach((npc, index) => setRelationship(state.world.relationships, current.id, npc.id, index === 0 ? '好友' : '竞争', index === 0 ? 20 : 35, state.world.currentYear, '同期入门'))
+    recordSocialMoment(`${current.name}加入${sect.name}，成为${membership.position}。`, 'sect', true)
+    scheduleSave()
+    return true
+  }
+
+  function donateSectResources(amount: number) {
+    const current = state.player
+    const sect = currentSect.value
+    const value = Math.max(0, Math.floor(amount))
+    if (!current?.sectMembership || !sect || !value || current.spiritStones < value) return false
+    const oldPosition = current.sectMembership.position
+    current.spiritStones -= value
+    sect.resources += value
+    addSectContribution(current, value)
+    if (current.sectMembership.position !== oldPosition) recordSocialMoment(`宗门贡献累积，晋升为${current.sectMembership.position}。`, 'sect', true)
+    else recordSocialMoment(`向${sect.name}上交${value}枚灵石，获得等量贡献。`, 'sect')
+    scheduleSave()
+    return true
+  }
+
+  function exchangeSectTechnique(techniqueId: string) {
+    const current = state.player
+    const sect = currentSect.value
+    const cost = techniqueContributionCost(techniqueId)
+    if (!current?.sectMembership || !sect?.techniqueIds.includes(techniqueId) || !canAccessSectTechnique(current, techniqueId) || current.knownTechniques.includes(techniqueId) || current.sectMembership.contribution < cost) return false
+    current.sectMembership.contribution -= cost
+    current.knownTechniques.push(techniqueId)
+    const technique = techniqueById(techniqueId)
+    if (technique) current.inheritanceHistory.push({ eventId: `sect:${sect.id}`, name: technique.name, year: state.world.currentYear, source: `${sect.name}贡献兑换` })
+    recordSocialMoment(`以宗门贡献换得《${technique?.name ?? techniqueId}》。`, 'sect', true)
+    scheduleSave()
+    return true
+  }
+
+  function chooseMaster(npcId: string) {
+    const current = state.player
+    const npc = state.world.npcCultivators.find((entry) => entry.id === npcId && entry.alive)
+    if (!current || !npc || current.masterId || npc.realmIndex <= current.realmIndex || npc.sectId !== current.sectMembership?.sectId) return false
+    current.masterId = npc.id
+    setRelationship(state.world.relationships, npc.id, current.id, '师徒', 45, state.world.currentYear, '拜入门下')
+    state.world.masterDisciples.push({ masterId: npc.id, discipleId: current.id, relationship: 45, startedYear: state.world.currentYear, status: 'active' })
+    recordSocialMoment(`拜${npc.name}为师，正式列入门墙。`, 'relationship', true)
+    scheduleSave()
+    return true
+  }
+
+  function changePlayerRelationship(npcId: string, type: RelationshipType, value: number) {
+    const current = state.player
+    const npc = state.world.npcCultivators.find((entry) => entry.id === npcId)
+    if (!current || !npc) return false
+    setRelationship(state.world.relationships, current.id, npc.id, type, value, state.world.currentYear, '人生往来')
+    recordSocialMoment(`与${npc.name}结为${type}。`, 'relationship', type === '仇恨' || type === '师徒')
+    scheduleSave()
+    return true
+  }
+
+  function establishCultivationFamily(name: string) {
+    const current = state.player
+    const family = current && state.world.families.find((entry) => entry.id === current.familyId)
+    if (!current || !family || current.realmIndex < 11 || family.kind === '玩家家族') return false
+    const territory = state.world.territories.find((entry) => entry.controllerType === '无主')
+    promoteCultivationFamily(family, current, name, state.world.currentYear, territory)
+    if (territory) { territory.controllerType = '家族'; territory.controllerId = family.id }
+    recordSocialMoment(`${current.name}建立${family.name}修仙家族${territory ? `，以${territory.name}为族地` : ''}。`, 'family', true)
+    scheduleSave()
+    return true
   }
 
   function applyEffect(effect: EventEffect, eventId: string) {
@@ -462,11 +570,17 @@ export const useGameStore = defineStore('game', () => {
     if (effect.type === 'ADD_STAT' && effect.stat) modifyStat(effect.stat, amount, effect.text ?? `人生事件「${eventId}」`)
     if (effect.type === 'ADD_CULTIVATION') current.cultivation = Math.max(0, current.cultivation + amount)
     if (effect.type === 'ADD_STONES') current.spiritStones = Math.max(0, current.spiritStones + amount)
+    if (effect.type === 'ADD_ITEM') addItem(String(effect.value))
+    if (effect.type === 'ADD_RESOURCE' && effect.resource) current.resources[effect.resource] = Math.max(0, current.resources[effect.resource] + amount)
+    if (effect.type === 'ADD_STATE' && effect.state) addCharacterState(current, effect.state)
+    if (effect.type === 'ADD_ELEMENT_GROWTH' && effect.element) growElement(current.spiritualAptitude, effect.element, amount)
+    if (effect.type === 'ADD_SOUL_STABILITY') current.soulStability = Math.max(0, Math.min(100, (current.soulStability ?? 50) + amount))
     if (effect.type === 'LEARN_TECHNIQUE') {
       const techniqueId = String(effect.value)
       const technique = techniqueById(techniqueId)
       if (technique && !current.knownTechniques.includes(techniqueId)) {
         current.knownTechniques.push(techniqueId)
+        current.inheritanceHistory.push({ eventId, name: technique.name, year: state.world.currentYear, source: effect.text ?? eventId })
         timeline(`因机缘获得功法《${technique.name}》。`, 'realm')
         if (!current.lifeTimeline.some((entry) => entry.type === 'inheritance')) recordLifeMoment(`第一次获得传承《${technique.name}》。`, 'inheritance', 3)
       }
@@ -490,25 +604,60 @@ export const useGameStore = defineStore('game', () => {
     if (effect.type === 'ADD_PATH_RESOURCE' && effect.pathResource) {
       current.pathResources[effect.pathResource] = Math.max(0, current.pathResources[effect.pathResource] + amount)
     }
+    if (effect.type === 'ADD_CONTRIBUTION') addSectContribution(current, amount)
+    if (effect.type === 'ADD_FAMILY_RESOURCE') {
+      const family = state.world.families.find((entry) => entry.id === current.familyId)
+      if (family) family.resources = Math.max(0, family.resources + amount)
+    }
+    if (effect.type === 'ADD_RELATIONSHIP' && effect.relationshipType) {
+      const target = state.world.npcCultivators.find((npc) => npc.alive && npc.id !== current.id && (!current.sectMembership || npc.sectId === current.sectMembership.sectId))
+      if (target) setRelationship(state.world.relationships, current.id, target.id, effect.relationshipType, amount, state.world.currentYear, effect.text ?? eventId)
+    }
   }
 
-  function chooseLifeEvent(choiceId: string) {
+  function chooseLifeEvent(choiceId: string, forcedRiskOutcome?: RiskOutcome) {
     const event = pendingLifeEvent.value
     const current = state.player
     if (!event || !current) return false
     const resolved = resolveLifeEventChoice(event, choiceId, current, state.world)
     if (!resolved) return false
-    for (const effect of resolved.choice.effects) applyLifeEventEffect(effect, event.id)
+    const assessment = calculateEventRisk(event, current, state.world, resolved.choice)
+    const riskOutcome = forcedRiskOutcome ?? resolveEventRisk(assessment, random)
     recordLifeEvent(current, resolved.record)
+    current.eventRiskHistory.push({ eventId: event.id, eventName: event.name, year: state.world.currentYear, choiceId, riskLevel: assessment.riskLevel, rewardLevel: assessment.rewardLevel, deathChance: assessment.deathChance, severeInjuryChance: assessment.severeInjuryChance, outcome: riskOutcome })
     recordLifeMoment(`${event.name}：${resolved.choice.label}。${resolved.choice.result}`, 'event', event.importance)
-    if (event.tags.includes('danger') && !current.lifeTimeline.some((entry) => entry.type === 'danger')) {
+    if (assessment.riskLevel > 0) {
+      current.dangerousEventCount++
+      current.dangerRecords.push({ eventId: event.id, year: state.world.currentYear, source: event.dangerTags.join('、') || '未知危险', result: riskOutcome, survived: riskOutcome !== 'death' })
+    }
+    if (riskOutcome === 'death') {
+      const category = eventDeathCategory(event)
+      const cause = `进入「${event.name}」后遭遇${event.dangerTags.includes('restriction') ? '禁制袭击' : event.dangerTags.includes('possession') ? '夺舍反噬' : event.dangerTags.includes('soul-dispersal') ? '魂体崩解' : event.dangerTags.includes('combat') ? '生死战' : '致命危机'}，陨落其中`
+      state.pendingLifeEvent = null
+      ready.eventResultTitle = `${event.name} · 身死道消`
+      ready.eventResultText = cause
+      die(cause, { category, description: cause, eventId: event.id })
+      scheduleSave()
+      return true
+    }
+    if (riskOutcome === 'severe-injury') { addCharacterState(current, CharacterState.SERIOUS_INJURY); current.severeInjuryCount++; modifyStat('constitution', -2, `${event.name}中遭受重创`) }
+    if (riskOutcome === 'injured') addCharacterState(current, CharacterState.INJURED)
+    for (const effect of resolved.choice.effects) applyLifeEventEffect(effect, event.id)
+    const rareReward = riskOutcome === 'turning-point' || random.chance(assessment.rareRewardChance)
+    if (rareReward && assessment.rewardLevel >= 2) {
+      const bonus = assessment.rewardLevel * 2
+      current.resources.spiritHerbs += bonus
+      current.spiritStones += assessment.rewardLevel * 25
+      current.majorOpportunities.push({ eventId: event.id, name: event.name, year: state.world.currentYear, rewardLevel: assessment.rewardLevel, result: riskOutcome === 'turning-point' ? '绝境中遇见转机' : '获得额外珍稀机缘' })
+    }
+    if (assessment.riskLevel >= 2 && !current.lifeTimeline.some((entry) => entry.type === 'danger')) {
       current.nearDeathCount++
       recordLifeMoment(`在「${event.name}」中第一次直面生死危机。`, 'danger', 3)
     }
     unlockAcquiredTalents(event.id)
     refreshFatePaths()
     ready.eventResultTitle = event.name
-    ready.eventResultText = resolved.choice.result
+    ready.eventResultText = `${resolved.choice.result}${riskOutcome === 'turning-point' ? ' 生死关头，气运为你带来一线转机。' : riskOutcome === 'severe-injury' ? ' 你虽活着归来，却已身受重伤。' : riskOutcome === 'injured' ? ' 你付出伤势作为代价。' : ''}${rareReward && assessment.rewardLevel >= 2 ? ' 你还发现了额外的珍稀收获。' : ''}`
     state.pendingLifeEvent = null
     scheduleSave()
     return true
@@ -539,19 +688,22 @@ export const useGameStore = defineStore('game', () => {
     if (current.achievements.includes('证得元婴') && !state.reincarnation.unlockedTalents.includes('dao-body')) state.reincarnation.unlockedTalents.push('dao-body')
   }
 
-  function breakthrough(forceSuccess?: boolean) {
+  function breakthrough(options: BreakthroughOptions & { forceSuccess?: boolean } = {}) {
     const current = state.player
     if (!current || state.pendingEvent || state.pendingLifeEvent || !canBreakthrough(current)) return
-    const chance = calculateBreakthroughChance(current, state.world).final
+    const calculation = calculateBreakthroughChance(current, state.world, options)
+    const chance = calculation.final
     const fromRealm = REALMS[current.realmIndex]
     const targetRealm = REALMS[current.realmIndex + 1]
+    const major = isMajorBreakthrough(current.realmIndex + 1)
     const lifespanBefore = current.lifespanMonths
-    consumeBreakthroughResources(current)
+    consumeBreakthroughAid(current, calculation.aid)
+    if (calculation.aid.lifespanMonths) current.lifespanMonths = calculateMaxLifespanMonths(current)
     let succeeded = false
     let resultText = ''
     advanceTime(1)
     if (!current.alive) return
-    if (forceSuccess ?? random.chance(chance)) {
+    if (options.forceSuccess ?? random.chance(chance)) {
       const firstBreakthrough = !current.lifeTimeline.some((entry) => entry.type === 'realm')
       succeeded = true
       current.realmIndex++
@@ -562,7 +714,7 @@ export const useGameStore = defineStore('game', () => {
       removeCharacterState(current, CharacterState.BOTTLENECK)
       removeCharacterState(current, CharacterState.INJURED)
       normalizeCharacterStates(current)
-      resultText = `突破成功，踏入${newRealm.name}。`
+      resultText = `突破成功，踏入${newRealm.name}${calculation.aid.descriptions.length ? `；辅助：${calculation.aid.descriptions.join('、')}` : ''}。`
       timeline(`破境成功，踏入${newRealm.name}！`, 'realm')
       recordLifeMoment(`突破至${newRealm.name}。`, 'realm', firstBreakthrough || isMajorBreakthrough(current.realmIndex) ? 3 : 2)
       if (isMajorBreakthrough(current.realmIndex)) {
@@ -584,25 +736,35 @@ export const useGameStore = defineStore('game', () => {
         unlockAcquiredTalents()
       }
       refreshFatePaths()
+      const oldPosition = current.sectMembership?.position
+      const newPosition = updateSectPosition(current)
+      if (newPosition && newPosition !== oldPosition) recordSocialMoment(`境界提升后晋升为${newPosition}。`, 'sect', true)
     } else {
-      current.cultivation = Math.round(current.cultivation * random.randomInt(65, 88) / 100)
-      const baseLoss = Math.max(3, current.realmIndex - 6) * random.randomInt(1, 4)
+      const lossPercent = major ? random.randomInt(20, 45) : random.randomInt(2, 7)
+      current.cultivation = Math.round(current.cultivation * (100 - lossPercent) / 100)
+      const highRealm = targetRealm.group === '金丹' || current.realmIndex >= 15
       const bodyResistance = current.primaryPath === 'body' ? .7 : 1
-      const demonicRisk = current.primaryPath === 'demonic' ? 1.6 : 1
-      const lifespanLoss = Math.round(baseLoss * bodyResistance * demonicRisk)
-      current.lifespanBonusMonths -= lifespanLoss
-      current.lifespanMonths = calculateMaxLifespanMonths(current)
-      if (current.primaryPath === 'demonic') current.pathResources.innerDemon = Math.min(100, current.pathResources.innerDemon + 10)
-      current.breakthroughProgress = Math.max(20, current.breakthroughProgress - 38)
-      addCharacterState(current, random.chance(.18 + (current.primaryPath === 'demonic' ? .12 : 0)) ? CharacterState.SERIOUS_INJURY : CharacterState.INJURED)
+      const demonicRisk = current.primaryPath === 'demonic' ? 1.5 : 1
+      const lifespanLoss = major && highRealm ? Math.round(Math.max(3, current.realmIndex - 8) * random.randomInt(1, 3) * bodyResistance * demonicRisk) : 0
+      if (lifespanLoss) { current.lifespanBonusMonths -= lifespanLoss; current.lifespanMonths = calculateMaxLifespanMonths(current) }
+      if (major && (current.primaryPath === 'demonic' || highRealm)) {
+        current.pathResources.innerDemon = Math.min(100, current.pathResources.innerDemon + (current.primaryPath === 'demonic' ? 12 : 5))
+        if (random.chance(.28 + (current.primaryPath === 'demonic' ? .18 : 0))) addCharacterState(current, CharacterState.INNER_DEMON)
+      }
+      current.breakthroughProgress = Math.max(0, current.breakthroughProgress - (major ? 35 : 10))
+      if (major) addCharacterState(current, random.chance(highRealm ? .42 : .16) ? CharacterState.SERIOUS_INJURY : CharacterState.INJURED)
       addCharacterState(current, CharacterState.BOTTLENECK)
-      resultText = `突破失败，修为倒退并折损${lifespanLoss}个月寿元。`
-      modifyStat('constitution', -1, '破境失败，道基受损')
+      resultText = major ? `突破${targetRealm.group}失败，修为损失 ${lossPercent}%${lifespanLoss ? `，并留下暗伤、折损${lifespanLoss}个月寿元` : '，经脉受创'}。` : `小境界突破失败，停留${fromRealm.name}，修为损失 ${lossPercent}%。`
+      if (major && highRealm) modifyStat('constitution', -1, '大境界突破失败，留下暗伤')
       if (current.cultivationRequired > 0 && current.cultivation / current.cultivationRequired < .15) current.nearDeathCount++
-      timeline(`破境失败，修为倒退，折损${lifespanLoss}个月寿元。`, 'event')
-      if (random.chance(Math.max(0, current.realmIndex - 13) * .009)) die('突破失败，道基崩毁')
+      timeline(resultText, 'event')
+      const previousFailures = current.breakthroughHistory.filter((entry) => !entry.success && entry.toRealm === targetRealm.name).length
+      const attemptText = previousFailures === 0 ? '第一次' : `第${previousFailures + 1}次`
+      recordLifeMoment(`${attemptText}突破${major ? targetRealm.group : targetRealm.name}失败。${highRealm ? '此劫在道基中留下暗伤。' : ''}`, major ? 'danger' : 'realm', major ? 3 : 2)
+      if (major && random.chance(Math.max(0, current.realmIndex - 16) * .006)) die('突破失败，道基崩毁', { category: 'breakthrough', description: '突破失败，道基崩毁' })
     }
     current.breakthroughHistory.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, month: state.world.currentMonth, fromRealm: fromRealm.name, toRealm: targetRealm.name, success: succeeded, chance, result: resultText, lifespanBefore, lifespanAfter: current.lifespanMonths })
+    removeFateTag(current, 'FRIEND_GUARDED_BREAKTHROUGH')
     current.breakthroughHistory.splice(100)
     scheduleSave()
   }
@@ -613,14 +775,17 @@ export const useGameStore = defineStore('game', () => {
     family.wealth += Math.floor(current.spiritStones * .5)
     mergeInventory(family.inventory, current.inventory.map((item) => ({ itemId: item.itemId, quantity: Math.floor(item.quantity / 2) })).filter((item) => item.quantity > 0))
     family.reputation += current.realmIndex * 2 + current.achievements.length * 5
+    family.resources += Math.floor(current.spiritStones * .2)
+    family.fame = Math.min(100, family.fame + current.realmIndex)
   }
 
-  function die(cause: string) {
+  function die(cause: string, detail?: Player['deathCause']) {
     const current = state.player
     if (!current?.alive) return
     current.alive = false
     current.deathFinalized = false
     current.causeOfDeath = cause
+    current.deathCause = detail ?? { category: cause.includes('魂飞魄散') ? 'soul-dispersal' : cause.includes('寿元') ? 'lifespan' : cause.includes('突破') ? 'breakthrough' : cause.includes('心魔') ? 'inner-demon' : 'adventure', description: cause }
     state.pendingEvent = null
     state.pendingLifeEvent = null
     timeline(`${current.name}${cause}，享年${Math.floor(current.ageMonths / 12)}岁。`, 'death')
@@ -646,7 +811,7 @@ export const useGameStore = defineStore('game', () => {
       const talentId = fateUnlocks[path.id]
       if (talentId && !state.reincarnation.unlockedTalents.includes(talentId)) state.reincarnation.unlockedTalents.push(talentId)
     }
-    if (!state.lifeRecords.some((record) => record.playerId === current.id)) state.lifeRecords.unshift(createLifeRecord(current, state.world.currentYear, realmName(current.realmIndex), points))
+    if (!state.lifeRecords.some((record) => record.playerId === current.id)) state.lifeRecords.unshift(createLifeRecord(current, state.world.currentYear, realmName(current.realmIndex), points, state.world.relationships))
     current.deathFinalized = true
     scheduleSave()
     return true
@@ -659,6 +824,7 @@ export const useGameStore = defineStore('game', () => {
     current.alive = true
     current.deathFinalized = false
     current.causeOfDeath = undefined
+    current.deathCause = undefined
     current.unlockedPaths = [...new Set<CultivationPathId>([...current.unlockedPaths, 'ghost'])]
     if (current.primaryPath && !current.secondaryPaths.some((entry) => entry.pathId === current.primaryPath)) {
       const previous = current.pathProgress.find((entry) => entry.pathId === current.primaryPath)
@@ -680,12 +846,13 @@ export const useGameStore = defineStore('game', () => {
     if (!deceased || deceased.alive || !descendant) return
     finalizeMortalDeath(deceased)
     const family = state.world.families.find((entry) => entry.id === descendant.familyId)
+    const familyLegacy = family ? inheritFamilyLegacy(family) : undefined
     descendant.isPlayer = true
     state.player = {
       id: descendant.id, name: descendant.name, generation: state.lifeRecords.length + 1, birthYear: descendant.birthYear,
       ageMonths: descendant.ageMonths, lifespanMonths: descendant.lifespanMonths, realmIndex: descendant.realmIndex,
       cultivation: descendant.cultivation, cultivationRequired: REALMS[descendant.realmIndex].cultivationRequired,
-      spiritRoot: { ...descendant.spiritRoot, elements: [...descendant.spiritRoot.elements], mutations: [...descendant.spiritRoot.mutations] }, stats: { ...descendant.stats }, statPotential: { ...descendant.statPotential }, statHistory: [], spiritStones: descendant.spiritStones + Math.floor((family?.wealth ?? 0) * .5),
+      spiritRoot: { ...descendant.spiritRoot, elements: [...descendant.spiritRoot.elements], mutations: [...descendant.spiritRoot.mutations] }, stats: { ...descendant.stats }, statPotential: { ...descendant.statPotential }, statHistory: [], spiritStones: descendant.spiritStones + (familyLegacy?.spiritStones ?? 0),
       inventory: descendant.inventory.map((item) => ({ ...item })), talents: descendant.talents.map((talent) => ({ ...talent, effects: talent.effects.map((effect) => ({ ...effect })) })), talentPoints: descendant.talents.reduce((sum, talent) => sum + talent.cost, 0),
       origin: descendant.origin, familyId: descendant.familyId, bloodline: family?.bloodline ?? deceased.bloodline,
       entryType: 'bloodline', parentId: deceased.id, predecessorName: deceased.name, alive: true, deathFinalized: false, achievements: [], timeline: [],
@@ -696,9 +863,10 @@ export const useGameStore = defineStore('game', () => {
       lifeEventHistory: [], fateTags: [], fatePaths: [], lifeTimeline: [], importantEvents: [],
       cultivationLogs: [], resources: initialCultivationResources(), characterStates: [CharacterState.NORMAL], breakthroughHistory: [], breakthroughProgress: 0,
       bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
+      eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
     }
     state.player.lifespanMonths = calculateMaxLifespanMonths(state.player)
-    if (family) { family.wealth = Math.ceil(family.wealth * .5); transferInventory(family.inventory, state.player.inventory) }
+    if (family) { family.wealth = Math.ceil(family.wealth * .5); family.resources = Math.ceil(family.resources * .5); family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${descendant.name}继承家族血脉与部分资产。`, type: 'family' }); transferInventory(family.inventory, state.player.inventory) }
     state.reincarnation.inHall = false
     state.pendingLifeEvent = null
     timeline(`${descendant.name}承接${deceased.name}的血脉与遗志，续写家族因果。`, 'life')
@@ -746,7 +914,7 @@ export const useGameStore = defineStore('game', () => {
 
   async function resetGame() { await SaveService.remove(); replaceState(emptySave()) }
 
-  type DebugAction = 'cultivation' | 'stones' | 'age' | 'age80' | 'age90' | 'age99' | 'event' | 'lifeEvent' | 'lifeEventPool' | 'addFateTag' | 'removeFateTag' | 'fateProgress' | 'lifeTimeline' | 'jumpAge' | 'death' | 'points' | 'unlockTalents' | 'descendant' | 'adultDescendants' | 'secret' | 'toggleGeneration' | 'hall' | 'pathDao' | 'pathSword' | 'pathBody' | 'pathDemonic' | 'pathGhost' | 'pathExperience' | 'swordIntent' | 'qiBlood' | 'demonicNature' | 'innerDemon' | 'karma' | 'soulStability' | 'majorLifespan' | 'rootTreasure' | 'rootTribulation' | 'rootInheritance' | 'rootBloodline' | 'rootTheft' | 'rootReincarnation' | 'rootPurify' | 'rootStabilize' | 'elementGrowth' | 'elements80' | 'balance90' | 'triggerFiveInsight' | 'grantFiveUnity' | 'checkAcquiredTalents' | 'unlockAcquiredTalents' | 'unlockTechniques' | 'techniqueExperience' | 'techniqueAffinity' | 'nearDeath' | 'breakthroughReady' | 'simulateBreakthrough' | 'addResources' | 'addInjury' | 'addInnerDemonState' | 'forceEnlightenment' | 'forceAdventure'
+  type DebugAction = 'cultivation' | 'stones' | 'age' | 'age80' | 'age90' | 'age99' | 'event' | 'lifeEvent' | 'lifeEventPool' | 'addFateTag' | 'removeFateTag' | 'fateProgress' | 'lifeTimeline' | 'jumpAge' | 'death' | 'points' | 'unlockTalents' | 'descendant' | 'adultDescendants' | 'secret' | 'toggleGeneration' | 'hall' | 'pathDao' | 'pathSword' | 'pathBody' | 'pathDemonic' | 'pathGhost' | 'pathExperience' | 'swordIntent' | 'qiBlood' | 'demonicNature' | 'innerDemon' | 'karma' | 'soulStability' | 'majorLifespan' | 'rootTreasure' | 'rootTribulation' | 'rootInheritance' | 'rootBloodline' | 'rootTheft' | 'rootReincarnation' | 'rootPurify' | 'rootStabilize' | 'elementGrowth' | 'elements80' | 'balance90' | 'triggerFiveInsight' | 'grantFiveUnity' | 'checkAcquiredTalents' | 'unlockAcquiredTalents' | 'unlockTechniques' | 'techniqueExperience' | 'techniqueAffinity' | 'nearDeath' | 'breakthroughReady' | 'simulateBreakthrough' | 'addResources' | 'addInjury' | 'addInnerDemonState' | 'forceEnlightenment' | 'forceAdventure' | 'highRiskEvent' | 'inheritanceEvent' | 'positiveFate' | 'negativeFate' | 'simulateCombatDeath' | 'luckHigh' | 'luckLow' | 'riskLevel' | 'createSect' | 'joinSect' | 'generateNpc' | 'modifyRelationship' | 'createCultivationFamily' | 'changeSectRelation' | 'advanceNpcAge'
   function debug(action: DebugAction) {
     if (action === 'points') state.reincarnation.totalPoints += 500
     if (action === 'unlockTalents') state.reincarnation.unlockedTalents = TALENTS.map((talent) => talent.id)
@@ -789,6 +957,24 @@ export const useGameStore = defineStore('game', () => {
       if (pool.length) triggerLifeEvent(selectLifeEvent(pool, random)?.id)
     }
     if (action === 'lifeEventPool') ready.debugSecret = lifeEventPool().map((entry) => `${entry.event.name}（权重 ${entry.weight.toFixed(2)}）`).join('\n') || '当前没有符合条件的人生事件。'
+    if (action === 'highRiskEvent') { state.pendingEvent = null; state.pendingLifeEvent = null; triggerLifeEvent('ancient-cultivator-cave') }
+    if (action === 'inheritanceEvent') { state.pendingEvent = null; state.pendingLifeEvent = null; triggerLifeEvent('ancient-stele-inheritance') }
+    if (action === 'positiveFate') addFateTag(current, { id: 'SAVED_ELDER', name: '救命之恩', description: '曾在危难中救下一位身份不明的老人。', createdAt: state.world.currentYear })
+    if (action === 'negativeFate') addFateTag(current, { id: 'KILLED_DISCIPLE', name: '杀徒之仇', description: '夺宝杀人所结下的血债，终有一日会被追索。', createdAt: state.world.currentYear })
+    if (action === 'simulateCombatDeath') die('遭强敌截杀，力战而亡', { category: 'combat', description: '遭强敌截杀，力战而亡' })
+    if (action === 'luckHigh') current.stats.luck = Math.min(current.statPotential.luck, 95)
+    if (action === 'luckLow') current.stats.luck = 10
+    if (action === 'riskLevel') ready.debugSecret = lifeEventPool().map(({ event: entry }) => `${entry.name}：风险 ${entry.riskLevel} / 奖励 ${entry.rewardLevel}`).join('\n') || '当前事件池为空。'
+    if (action === 'createSect') state.world.sects.push(createSect(crypto.randomUUID(), `无名山门${state.world.sects.length + 1}`, '散修联盟', 1, '荒山', random))
+    if (action === 'joinSect' && !current.sectMembership) { current.realmIndex = Math.max(1, current.realmIndex); joinPlayerSect(state.world.sects[0]?.id ?? '') }
+    if (action === 'generateNpc') state.world.npcCultivators.push(generateNPCCultivator(random, state.world.currentYear, currentSect.value ?? state.world.sects[0]))
+    if (action === 'modifyRelationship') {
+      const npc = state.world.npcCultivators.find((entry) => entry.alive)
+      if (npc) changePlayerRelationship(npc.id, relationshipBetween(state.world.relationships, current.id, npc.id)?.type === '好友' ? '敌对' : '好友', 50)
+    }
+    if (action === 'createCultivationFamily') { current.realmIndex = Math.max(11, current.realmIndex); establishCultivationFamily(`${current.name.slice(0, 1)}氏仙族`) }
+    if (action === 'changeSectRelation' && state.world.sectRelations[0]) changeSectRelation(state.world.sectRelations[0], state.world.sectRelations[0].type === '敌对' ? 100 : -100, state.world.currentYear)
+    if (action === 'advanceNpcAge') for (const npc of state.world.npcCultivators) simulateNPCCultivator(npc, 120, state.world.currentYear + 10, random)
     if (action === 'addFateTag') addFateTag(current, { id: `DEBUG_FATE_${current.fateTags.length + 1}`, name: '调试因果', description: '由 Debug Panel 添加。', createdAt: state.world.currentYear })
     if (action === 'removeFateTag') current.fateTags.pop()
     if (action === 'fateProgress') {
@@ -854,10 +1040,10 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration,
+    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, currentSect, sectPeers, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration,
     initialize, createCharacter, cultivate, adventure, advanceYear, breakthrough, chooseEvent, chooseLifeEvent, closeEventResult, triggerRandomEvent, triggerLifeEvent, lifeEventPool, continueAsDescendant,
     enterReincarnationHall, beginReincarnationCreation, purchaseFate, canPurchaseFate: (purchase: FatePurchase) => canPurchaseFate(state.reincarnation, purchase),
     modifyStat, selectPrimaryPath, selectSecondaryPath, pathPractice, bloodRite, becomeGhost, finalizeMortalDeath, regenerateWorld, debugWorld, useItem,
-    learnTechnique, selectTechnique, improveAcquiredRoot, techniqueCatalog: TECHNIQUES, actionCatalog: CULTIVATION_ACTIONS, manualSave, resetGame, replaceState, debug,
+    learnTechnique, selectTechnique, improveAcquiredRoot, joinPlayerSect, donateSectResources, exchangeSectTechnique, chooseMaster, changePlayerRelationship, establishCultivationFamily, techniqueCatalog: TECHNIQUES, actionCatalog: CULTIVATION_ACTIONS, manualSave, resetGame, replaceState, debug,
   }
 })

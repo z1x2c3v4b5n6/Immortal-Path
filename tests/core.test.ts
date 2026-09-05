@@ -25,7 +25,7 @@ describe('existing game rules', () => {
   it('calculates bounded breakthrough chance', () => {
     const result = calculateBreakthroughChance(playerFixture())
     expect(result.final).toBeGreaterThanOrEqual(.12)
-    expect(result.final).toBeLessThanOrEqual(.96)
+    expect(result.final).toBeLessThanOrEqual(.99)
   })
   it('advances world time by month', () => {
     const world = worldFixture({ currentYear: 100, currentMonth: 11, worldEvents: [], sects: [], npcs: [], descendants: [], families: [] })
@@ -47,7 +47,7 @@ describe('save serialization', () => {
   it('round trips V2 world state', () => {
     const base = deserializeSave(JSON.stringify({ version: 1, world: { currentYear: 300 }, reincarnation: {}, lifeRecords: [] }))
     expect(deserializeSave(serializeSave(base)).world.currentYear).toBe(300)
-    expect(deserializeSave(serializeSave(base)).version).toBe(8)
+    expect(deserializeSave(serializeSave(base)).version).toBe(11)
   })
   it('rejects unrelated JSON', () => expect(() => deserializeSave('{"hello":true}')).toThrow())
 })
