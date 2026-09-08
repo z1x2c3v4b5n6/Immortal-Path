@@ -87,5 +87,6 @@ export function createLifeRecord(player: Player, deathYear: number, realmName: s
     eventRiskHistory: player.eventRiskHistory.map((entry) => ({ ...entry })), deathCause: player.deathCause ? { ...player.deathCause } : undefined,
     dangerRecords: player.dangerRecords.map((entry) => ({ ...entry })), majorOpportunities: player.majorOpportunities.map((entry) => ({ ...entry })), inheritanceHistory: player.inheritanceHistory.map((entry) => ({ ...entry })),
     sectMembership: player.sectMembership ? { ...player.sectMembership } : undefined, socialHistory: player.socialHistory.map((entry) => ({ ...entry })), relationshipSummary: relationshipSummary(relationships, player.id),
+    combatHistory: player.combatHistory.map((entry) => ({ ...entry, rounds: entry.rounds.map((round) => ({ ...round })) })), battleAchievements: [...player.battleAchievements], battleStats: { ...player.battleStats },
   }
 }

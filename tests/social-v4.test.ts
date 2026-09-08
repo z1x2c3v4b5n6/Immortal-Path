@@ -160,7 +160,7 @@ describe('V4 store society loop and social events', () => {
   })
 })
 
-describe('Save V11 migration and JSON', () => {
+describe('V4 social data migration and JSON', () => {
   it('migrates a V10 world and player without type assertions masking missing fields', () => {
     const legacy = saveFixture({ version: 10 })
     const player = { ...legacy.player } as Record<string, unknown>
@@ -169,7 +169,7 @@ describe('Save V11 migration and JSON', () => {
     oldWorld.sects = oldWorld.sects.map(({ id, name, power, status }) => ({ id, name, power, status })) as typeof oldWorld.sects
     oldWorld.families = oldWorld.families.map(({ kind: _kind, resources: _resources, fame: _fame, territory: _territory, history: _history, ...family }) => family) as typeof oldWorld.families
     const migrated = migrateSave({ ...legacy, version: 10, player, world: oldWorld })
-    expect(migrated.version).toBe(11)
+    expect(migrated.version).toBe(12)
     expect(migrated.player).toMatchObject({ discipleIds: [], socialHistory: [] })
     expect(migrated.world.sects.every((sect) => sect.type && sect.location && Array.isArray(sect.techniqueIds))).toBe(true)
     expect(migrated.world.sectRelations.length).toBeGreaterThan(0)
@@ -184,7 +184,7 @@ describe('Save V11 migration and JSON', () => {
     save.player!.socialHistory.push({ id: 'social', year: 120, text: '加入山门', type: 'sect' })
     setRelationship(save.world.relationships, save.player!.id, save.world.npcCultivators[0].id, '好友', 55, 120)
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(11)
+    expect(restored.version).toBe(12)
     expect(restored.player!.sectMembership).toEqual(save.player!.sectMembership)
     expect(restored.player!.socialHistory).toEqual(save.player!.socialHistory)
     expect(restored.world.npcCultivators).toEqual(save.world.npcCultivators)

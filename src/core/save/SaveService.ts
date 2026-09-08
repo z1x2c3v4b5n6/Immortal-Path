@@ -17,6 +17,7 @@ class GameDatabase extends Dexie {
     this.version(9).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
     this.version(10).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
     this.version(11).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
+    this.version(12).stores({ saves: 'id,updatedAt' }).upgrade((transaction) => transaction.table('saves').toCollection().modify((save: unknown) => Object.assign(save as object, migrateSave(save))))
   }
 }
 

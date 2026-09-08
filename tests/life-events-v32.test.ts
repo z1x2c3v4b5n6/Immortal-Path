@@ -190,7 +190,7 @@ describe('V3.2 life-state migration and JSON recovery', () => {
     const save = saveFixture()
     const { lifeEventHistory: _history, fateTags: _tags, fatePaths: _paths, lifeTimeline: _timeline, importantEvents: _important, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 6, player: legacyPlayer, pendingLifeEvent: undefined })
-    expect(migrated.version).toBe(11)
+    expect(migrated.version).toBe(12)
     expect(migrated.pendingLifeEvent).toBeNull()
     expect(migrated.player).toMatchObject({ lifeEventHistory: [], fateTags: [], fatePaths: [], lifeTimeline: [], importantEvents: [] })
   })
@@ -203,7 +203,7 @@ describe('V3.2 life-state migration and JSON recovery', () => {
     const entry = createLifeTimelineEntry(save.player!, 120, 2, '救下一位老人。', 'event', 3)
     addLifeTimelineEntry(save.player!, entry)
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(11)
+    expect(restored.version).toBe(12)
     expect(restored.pendingLifeEvent).toEqual({ eventId: 'mountain-elder' })
     expect(restored.player!.lifeEventHistory).toEqual(save.player!.lifeEventHistory)
     expect(restored.player!.fateTags).toEqual(save.player!.fateTags)

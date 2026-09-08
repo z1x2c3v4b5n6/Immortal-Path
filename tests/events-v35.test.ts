@@ -117,7 +117,7 @@ describe('V3.5 opportunity migration and recovery under the current save schema'
     const save = saveFixture()
     const { eventRiskHistory: _risks, deathCause: _death, dangerRecords: _danger, majorOpportunities: _major, inheritanceHistory: _inheritance, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 9, player: legacyPlayer })
-    expect(migrated.version).toBe(11)
+    expect(migrated.version).toBe(12)
     expect(migrated.player).toMatchObject({ eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [] })
     expect(migrated.player!.deathCause).toBeUndefined()
   })
@@ -130,7 +130,7 @@ describe('V3.5 opportunity migration and recovery under the current save schema'
     save.player!.inheritanceHistory.push({ eventId: 'cave', name: '风雷遁甲经', year: 120, source: '古修传承' })
     save.player!.deathCause = { category: 'restriction', description: '触发洞府禁制', eventId: 'cave' }
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(11)
+    expect(restored.version).toBe(12)
     expect(restored.player!.eventRiskHistory).toEqual(save.player!.eventRiskHistory)
     expect(restored.player!.dangerRecords).toEqual(save.player!.dangerRecords)
     expect(restored.player!.majorOpportunities).toEqual(save.player!.majorOpportunities)

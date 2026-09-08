@@ -14,6 +14,16 @@ const breakthroughStability = computed(() => game.player!.spiritRoot.breakthroug
 const primaryProgress = computed(() => game.player!.pathProgress.find((entry) => entry.pathId === game.player!.primaryPath))
 const activeTechnique = computed(() => game.player!.activeTechnique ? techniqueById(game.player!.activeTechnique) : undefined)
 const fiveElementBalance = computed(() => calculateFiveElementBalance(game.player!.spiritualAptitude))
+const relationshipSummary = computed(() => {
+  const relations = game.state.world.relationships.filter((entry) => entry.fromId === game.player!.id || entry.toId === game.player!.id)
+  return {
+    friends: relations.filter((entry) => entry.type === '好友' || entry.type === '恩情').length,
+    rivals: relations.filter((entry) => entry.type === '竞争').length,
+    enemies: relations.filter((entry) => entry.type === '敌对' || entry.type === '仇恨').length,
+    descendants: game.state.world.descendants.filter((entry) => entry.parents.includes(game.player!.id)).length,
+  }
+})
+const elementGrowth = computed(() => Object.entries(game.player!.spiritualAptitude.elementalGrowth))
 </script>
 
 <template>
@@ -21,6 +31,7 @@ const fiveElementBalance = computed(() => calculateFiveElementBalance(game.playe
     <div class="eyebrow">今世道途 · {{ game.player!.entryType === 'initial' ? '初入人间' : game.player!.entryType === 'bloodline' ? '血脉延续' : '轮回转世' }}</div>
     <div class="identity"><div class="avatar">{{ game.player!.name.slice(0, 1) }}</div><div><h2>{{ game.player!.name }}</h2><p>{{ game.player!.origin.name }}</p></div></div>
     <div class="realm-badge"><small>当前境界</small><strong>{{ game.currentRealm.name }}</strong></div>
+    <RouterLink to="/combat" class="combat-sidebar"><small>斗法战力</small><strong>{{ game.combatPower?.total.toLocaleString() }}</strong><span v-if="game.pendingCombat">遭遇强敌 · 待决</span><span v-else>战绩 {{ game.player!.battleStats.wins }} 胜 / {{ game.player!.battleStats.battles }} 战</span></RouterLink>
     <div class="progress-block">
       <div><span>修为</span><b>{{ Math.floor(game.player!.cultivation).toLocaleString() }} / {{ game.player!.cultivationRequired.toLocaleString() }}</b></div>
       <div class="progress"><i :style="{ width: `${progress}%` }"></i></div>
@@ -34,6 +45,9 @@ const fiveElementBalance = computed(() => calculateFiveElementBalance(game.playe
     <div class="path-card"><small>道途</small><b v-if="game.player!.primaryPath">主道：{{ pathById(game.player!.primaryPath)?.name }} Lv.{{ primaryProgress?.level ?? 1 }}</b><b v-else>尚未正式踏上道途</b><p v-if="game.player!.secondaryPaths.length">兼修：{{ pathById(game.player!.secondaryPaths[0].pathId)?.name }} Lv.{{ game.player!.secondaryPaths[0].level }}</p><p v-if="game.player!.primaryPath === 'sword'">{{ swordIntentName(game.player!.pathResources.swordIntent) }} · 剑意 {{ game.player!.pathResources.swordIntent }}</p><p v-if="game.player!.primaryPath === 'body'">{{ bodyStageName(game.player!.pathResources.bodyStage) }} · 气血 {{ game.player!.pathResources.qiBlood }} / {{ game.player!.pathResources.maxQiBlood }}</p><p v-if="game.player!.primaryPath === 'demonic'">魔性 {{ game.player!.pathResources.demonicNature }} · 心魔 {{ game.player!.pathResources.innerDemon }} · 业力 {{ game.player!.pathResources.karma }}</p><p v-if="game.player!.primaryPath === 'ghost'">魂体稳定 {{ Math.round(game.player!.soulStability ?? 0) }}%</p></div>
     <div class="root-card"><small>社会身份</small><b>{{ game.currentSect ? game.currentSect.name : '一介散修' }}</b><p v-if="game.player!.sectMembership">{{ game.player!.sectMembership.position }} · 贡献 {{ game.player!.sectMembership.contribution }}</p><p v-else>尚未拜入任何山门</p></div>
     <div class="stat-list"><div v-for="stat in stats" :key="stat[0]"><span>{{ stat[0] }}</span><b>{{ stat[1] }} / {{ stat[2] }}</b><i><em :style="{ width: `${Math.min(100, stat[1] / stat[2] * 100)}%` }"></em></i></div></div>
+    <div class="drawer-detail-block"><small>五行成长</small><div class="element-growth-mini"><span v-for="element in elementGrowth" :key="element[0]"><b>{{ element[0] }}</b>{{ element[1] }}</span></div></div>
+    <div class="drawer-detail-block"><small>命运线</small><div class="drawer-fate-list"><span v-for="fate in game.player!.fatePaths" :key="fate.id">{{ fate.name }} · {{ fate.status === 'completed' ? '已铸成' : `${fate.progress}%` }}</span><span v-if="!game.player!.fatePaths.length">此生命运尚未成形</span></div></div>
+    <div class="drawer-detail-block"><small>社会关系</small><div class="drawer-social-summary"><span>好友 {{ relationshipSummary.friends }}</span><span>竞争 {{ relationshipSummary.rivals }}</span><span>仇敌 {{ relationshipSummary.enemies }}</span><span>后代 {{ relationshipSummary.descendants }}</span></div></div>
     <div v-if="activeTechnique" class="root-card"><small>主修功法</small><b>《{{ activeTechnique.name }}》</b><p>{{ activeTechnique.grade }} · {{ activeTechnique.description }}</p></div>
     <div class="talent-tags"><span v-for="talent in game.player!.talents" :key="talent.id" :title="talent.description">{{ talent.name }}</span><span v-for="talent in game.player!.acquiredTalents" :key="talent.talentId" class="acquired">后天·{{ talent.name }}</span></div>
     <div class="bloodline-note"><small>{{ game.player!.bloodline.familyName }}</small><span>{{ game.player!.bloodline.inheritedTraits.join(' · ') || '凡俗血脉' }}</span></div>

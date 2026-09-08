@@ -91,6 +91,19 @@ export enum LifeStage { CHILDHOOD = 'CHILDHOOD', TEENAGE = 'TEENAGE', MORTAL = '
 export enum CultivationAction { MEDITATION = 'MEDITATION', ADVENTURE = 'ADVENTURE', ENLIGHTENMENT = 'ENLIGHTENMENT', BODY_TRAINING = 'BODY_TRAINING', TRAVEL = 'TRAVEL', RECOVERY = 'RECOVERY' }
 export enum CharacterState { NORMAL = 'NORMAL', INJURED = 'INJURED', SERIOUS_INJURY = 'SERIOUS_INJURY', INNER_DEMON = 'INNER_DEMON', ENLIGHTENED = 'ENLIGHTENED', BOTTLENECK = 'BOTTLENECK' }
 export enum BodyRealm { SKIN = 'SKIN', FLESH = 'FLESH', BONE = 'BONE', VISCERA = 'VISCERA', BLOOD = 'BLOOD', GOLDEN_BODY = 'GOLDEN_BODY' }
+export enum CombatStrategy { CAUTIOUS = 'CAUTIOUS', BALANCED = 'BALANCED', AGGRESSIVE = 'AGGRESSIVE', DESPERATE = 'DESPERATE', ESCAPE = 'ESCAPE' }
+export type CombatOutcome = 'victory' | 'defeat' | 'escape' | 'death'
+export type CombatEnemyType = 'beast' | 'cultivator' | 'rival' | 'sect' | 'family'
+export type BattleCardType = 'secret-art' | 'pill' | 'talisman' | 'artifact'
+export type ArtifactSlot = 'weapon' | 'armor' | 'special'
+export interface BattleCard { id: string; name: string; type: BattleCardType; description: string; powerMultiplier: number; defenseMultiplier: number; escapeBonus: number; lifespanCost: number; charges: number }
+export interface EquippedArtifact { id: string; name: string; slot: ArtifactSlot; attack: number; defense: number; power: number; element?: SpiritElement; specialEffect?: string }
+export interface BattleStats { battles: number; wins: number; losses: number; escapes: number; kills: number; beastKills: number; upsetWins: number; winStreak: number; experience: number }
+export interface CombatPowerBreakdown { realm: number; technique: number; root: number; stats: number; talents: number; path: number; artifacts: number; state: number; experience: number; total: number }
+export interface CombatEnemy { id: string; name: string; type: CombatEnemyType; realmIndex: number; path: CultivationPathId; elements: SpiritElement[]; combatPower: number; attack: number; defense: number; health: number; description: string; recommendedRealmIndex: number; npcId?: string; rewardStones: number; rewardItemId?: string }
+export interface CombatRound { round: number; actor: 'player' | 'enemy'; text: string; damage: number; playerHealth: number; enemyHealth: number }
+export interface CombatRecord { id: string; year: number; month: number; enemyName: string; enemyType: CombatEnemyType; enemyRealmIndex: number; playerRealmIndex: number; playerPower: number; enemyPower: number; strategy: CombatStrategy; battleCardName?: string; environment: string; outcome: CombatOutcome; rounds: CombatRound[]; summary: string; legendary: boolean }
+export interface PendingCombat { enemy: CombatEnemy; environment: string; source: 'adventure' | 'event' | 'sect' | 'family' | 'debug'; sourceEventId?: string; victoryEffects?: LifeEventEffect[] }
 export interface CultivationResources { spiritHerbs: number; beastCores: number; bodyMaterials: number; soulCrystals: number }
 export interface CurrentAction { action: CultivationAction; startedYear: number; durationYears: number }
 export type ActionResultType = 'ordinary' | 'technique-breakthrough' | 'insight' | 'bottleneck' | 'inner-demon' | 'resource' | 'danger' | 'recovery'
@@ -104,7 +117,7 @@ export interface EventChoice { id: string; label: string; description?: string; 
 export interface LifeEvent { id: string; name: string; description: string; stage: LifeStage; conditions: EventCondition[]; choices: EventChoice[]; weight: number; cooldown: number; tags: string[]; importance: 1 | 2 | 3 | 4; riskLevel: 0 | 1 | 2 | 3 | 4; rewardLevel: 1 | 2 | 3 | 4; dangerTags: string[]; recommendedRealmIndex?: number }
 export interface FateTag { id: string; name: string; description: string; createdAt: number }
 export interface LifeEventRecord { eventId: string; eventName: string; year: number; month: number; age: number; choice: string; choiceLabel: string; result: string; importance: 1 | 2 | 3 | 4; tags: string[] }
-export interface LifeTimelineEntry { id: string; year: number; month: number; age: number; text: string; type: 'begin' | 'event' | 'realm' | 'inheritance' | 'danger' | 'talent' | 'fate' | 'death'; importance: 1 | 2 | 3 | 4 }
+export interface LifeTimelineEntry { id: string; year: number; month: number; age: number; text: string; type: 'begin' | 'event' | 'realm' | 'inheritance' | 'danger' | 'talent' | 'fate' | 'combat' | 'death'; importance: 1 | 2 | 3 | 4 }
 export interface FatePathState { id: string; name: string; description: string; progress: number; status: 'forming' | 'completed'; milestones: string[]; evaluation: number; completedYear?: number }
 export type DeathCauseCategory = 'lifespan' | 'combat' | 'adventure' | 'breakthrough' | 'inner-demon' | 'restriction' | 'possession' | 'soul-dispersal'
 export interface DeathCauseDetail { category: DeathCauseCategory; description: string; eventId?: string }
@@ -229,6 +242,12 @@ export interface Player {
   masterId?: string
   discipleIds: string[]
   socialHistory: SocialHistoryEntry[]
+  combatPower: number
+  combatHistory: CombatRecord[]
+  battleAchievements: string[]
+  equippedArtifacts: EquippedArtifact[]
+  battleCards: BattleCard[]
+  battleStats: BattleStats
 }
 
 export interface Descendant {
@@ -339,6 +358,9 @@ export interface NPCCultivator {
   alive: boolean
   deathYear?: number
   generation: number
+  knownTechniques: string[]
+  combatPower: number
+  battleStats: BattleStats
 }
 export interface Relationship { id: string; fromId: string; toId: string; type: RelationshipType; value: number; createdYear: number; note: string }
 export interface SectRelation { id: string; fromSectId: string; toSectId: string; type: SectRelationType; value: number; updatedYear: number }
@@ -399,6 +421,9 @@ export interface LifeRecord {
   sectMembership?: SectMembership
   socialHistory: SocialHistoryEntry[]
   relationshipSummary: { friends: number; rivals: number; enemies: number; disciples: number }
+  combatHistory: CombatRecord[]
+  battleAchievements: string[]
+  battleStats: BattleStats
 }
 
 export interface ReincarnationSelections {
@@ -473,4 +498,5 @@ export interface GameSave {
   pendingEvent: PendingEvent | null
   pendingLifeEvent: PendingLifeEvent | null
   currentAction: CurrentAction | null
+  pendingCombat: PendingCombat | null
 }

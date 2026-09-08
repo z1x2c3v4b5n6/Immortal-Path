@@ -223,7 +223,7 @@ describe('V3.1 fields through current save migration', () => {
     const legacy = saveFixture({ version })
     const { spiritualAptitude: _aptitude, acquiredTalents: _talents, knownTechniques: _known, techniqueProgress: _progress, ...legacyPlayer } = legacy.player!
     const migrated = migrateSave({ ...legacy, player: legacyPlayer })
-    expect(migrated.version).toBe(11)
+    expect(migrated.version).toBe(12)
     expect(migrated.player?.spiritualAptitude.innateRoot).toMatchObject({ elements: ['水', '木'] })
     expect(migrated.player?.acquiredTalents).toEqual([])
     expect(migrated.player?.knownTechniques).toContain('plain-breath')

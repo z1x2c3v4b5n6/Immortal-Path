@@ -3,6 +3,8 @@ import { randomSpiritRoot } from '../creation/creation'
 import type { CultivationPathId, NPCCultivator, Sect } from '../../models'
 import type { RandomService } from '../random/RandomService'
 import { SECT_TYPE_PATH, sectPositionForRealm } from '../sect/sect'
+import { calculateNPCCombatPower } from '../combat/combatPower'
+import { initialBattleStats } from '../combat/combat'
 
 const surnames = ['顾', '沈', '林', '谢', '陆', '苏', '楚', '江', '叶', '白', '宁', '裴']
 const givenNames = ['青崖', '照雪', '闻道', '清弦', '长庚', '明夷', '归尘', '无咎', '云深', '玄策', '若谷', '星河']
@@ -13,13 +15,15 @@ export function generateNPCCultivator(rng: RandomService, currentYear: number, s
   const realm = realmIndex ?? rng.randomInt(1, Math.max(2, (sect?.rank ?? 1) * 6))
   const path: CultivationPathId = sect ? SECT_TYPE_PATH[sect.type] : rng.pick(['dao', 'sword', 'body', 'demonic', 'ghost'] as CultivationPathId[])
   const ageYears = rng.randomInt(16, Math.max(25, REALMS[realm].baseLifespanYears - 5))
-  return {
+  const npc: NPCCultivator = {
     id: crypto.randomUUID(), name: `${rng.pick(surnames)}${rng.pick(givenNames)}`, ageMonths: ageYears * 12,
     lifespanMonths: REALMS[realm].baseLifespanYears * 12, realmIndex: realm, cultivation: rng.randomInt(0, Math.max(1, REALMS[realm].cultivationRequired - 1)),
     spiritRoot: randomSpiritRoot(rng, sect?.rank ? sect.rank * 2 : 0), path, talents: rng.chance(.22) ? [rng.pick(['早慧', '勤修', '剑骨', '福缘'])] : [],
     personality: rng.pick(personalities), sectId: sect?.id, position: sect ? sectPositionForRealm(realm, rng.randomInt(0, 700)) : undefined,
-    alive: true, generation,
+    alive: true, generation, knownTechniques: sect?.techniqueIds.slice(0, Math.max(1, Math.min(3, sect.rank))) ?? ['plain-breath'], combatPower: 0, battleStats: initialBattleStats(),
   }
+  npc.combatPower = calculateNPCCombatPower(npc)
+  return npc
 }
 
 export function generateSectCohort(rng: RandomService, currentYear: number, sect: Sect, count = rng.randomInt(10, 30)) {
@@ -39,5 +43,6 @@ export function simulateNPCCultivator(npc: NPCCultivator, months: number, curren
     npc.lifespanMonths = Math.max(npc.lifespanMonths, REALMS[npc.realmIndex].baseLifespanYears * 12)
     npc.position = npc.sectId ? sectPositionForRealm(npc.realmIndex) : undefined
   }
+  npc.combatPower = calculateNPCCombatPower(npc)
   return npc
 }

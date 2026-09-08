@@ -13,8 +13,10 @@ import { BODY_REALM_ORDER } from '../actions/action'
 import { initialSectRelations } from '../sect/sectRelation'
 import { generateTerritories } from '../world/territories'
 import { createSeededRandom } from '../random/RandomService'
+import { initialBattleStats } from '../combat/combat'
+import { calculateCombatPower, calculateNPCCombatPower } from '../combat/combatPower'
 
-export const CURRENT_SAVE_VERSION = 11
+export const CURRENT_SAVE_VERSION = 12
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
 
@@ -130,7 +132,9 @@ function migrateNPCCultivators(value: unknown): NPCCultivator[] {
   if (!Array.isArray(value)) return []
   return value.map((entry, index) => {
     const old = record(entry); const realmIndex = typeof old.realmIndex === 'number' ? old.realmIndex : 0
-    return { ...(old as unknown as NPCCultivator), id: typeof old.id === 'string' ? old.id : `legacy-npc-${index}`, name: typeof old.name === 'string' ? old.name : `旧世修士${index + 1}`, ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 20 * 12, lifespanMonths: typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 100 * 12, realmIndex, cultivation: typeof old.cultivation === 'number' ? old.cultivation : 0, spiritRoot: migrateRoot(old.spiritRoot), path: ['dao', 'sword', 'body', 'demonic', 'ghost'].includes(String(old.path)) ? old.path as CultivationPathId : 'dao', talents: Array.isArray(old.talents) ? old.talents.filter((item): item is string => typeof item === 'string') : [], personality: typeof old.personality === 'string' ? old.personality : '沉稳', alive: old.alive !== false, generation: typeof old.generation === 'number' ? old.generation : 1 }
+    const npc: NPCCultivator = { ...(old as unknown as NPCCultivator), id: typeof old.id === 'string' ? old.id : `legacy-npc-${index}`, name: typeof old.name === 'string' ? old.name : `旧世修士${index + 1}`, ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 20 * 12, lifespanMonths: typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 100 * 12, realmIndex, cultivation: typeof old.cultivation === 'number' ? old.cultivation : 0, spiritRoot: migrateRoot(old.spiritRoot), path: ['dao', 'sword', 'body', 'demonic', 'ghost'].includes(String(old.path)) ? old.path as CultivationPathId : 'dao', talents: Array.isArray(old.talents) ? old.talents.filter((item): item is string => typeof item === 'string') : [], personality: typeof old.personality === 'string' ? old.personality : '沉稳', alive: old.alive !== false, generation: typeof old.generation === 'number' ? old.generation : 1, knownTechniques: Array.isArray(old.knownTechniques) ? old.knownTechniques.filter((item): item is string => typeof item === 'string') : ['plain-breath'], combatPower: typeof old.combatPower === 'number' ? old.combatPower : 0, battleStats: { ...initialBattleStats(), ...record(old.battleStats) } }
+    npc.combatPower = calculateNPCCombatPower(npc)
+    return npc
   })
 }
 
@@ -232,10 +236,17 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
     masterId: typeof old.masterId === 'string' ? old.masterId : undefined,
     discipleIds: Array.isArray(old.discipleIds) ? old.discipleIds.filter((entry): entry is string => typeof entry === 'string') : [],
     socialHistory: Array.isArray(old.socialHistory) ? old.socialHistory as Player['socialHistory'] : [],
+    combatPower: typeof old.combatPower === 'number' ? old.combatPower : 0,
+    combatHistory: Array.isArray(old.combatHistory) ? old.combatHistory as Player['combatHistory'] : [],
+    battleAchievements: Array.isArray(old.battleAchievements) ? old.battleAchievements.filter((entry): entry is string => typeof entry === 'string') : [],
+    equippedArtifacts: Array.isArray(old.equippedArtifacts) ? old.equippedArtifacts as Player['equippedArtifacts'] : [],
+    battleCards: Array.isArray(old.battleCards) ? old.battleCards as Player['battleCards'] : [],
+    battleStats: { ...initialBattleStats(), ...record(old.battleStats) },
   }
   if (!player.unlockedPaths.length) player.unlockedPaths = ['dao', 'sword', 'body']
   if (!player.characterStates.length) player.characterStates = [CharacterState.NORMAL]
   if (sourceVersion < 5) player.lifespanMonths = Math.max(typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 0, calculateMaxLifespanMonths(player))
+  player.combatPower = calculateCombatPower(player, world).total
   return player
 }
 
@@ -271,6 +282,9 @@ function migrateLifeRecords(value: unknown): LifeRecord[] {
       sectMembership: old.sectMembership && typeof old.sectMembership === 'object' ? old.sectMembership as LifeRecord['sectMembership'] : undefined,
       socialHistory: Array.isArray(old.socialHistory) ? old.socialHistory as LifeRecord['socialHistory'] : [],
       relationshipSummary: old.relationshipSummary && typeof old.relationshipSummary === 'object' ? old.relationshipSummary as LifeRecord['relationshipSummary'] : { friends: 0, rivals: 0, enemies: 0, disciples: 0 },
+      combatHistory: Array.isArray(old.combatHistory) ? old.combatHistory as LifeRecord['combatHistory'] : [],
+      battleAchievements: Array.isArray(old.battleAchievements) ? old.battleAchievements.filter((entry): entry is string => typeof entry === 'string') : [],
+      battleStats: { ...initialBattleStats(), ...record(old.battleStats) },
     }
   })
 }
@@ -282,7 +296,7 @@ export function migrateSave(value: unknown): GameSave {
   const seed = typeof oldWorld.seed === 'string' && oldWorld.seed.trim() ? oldWorld.seed.trim().toUpperCase() : stableLegacySeed(oldWorld)
   const baseWorld = createWorld(seed)
   const sects = migrateSects(oldWorld.sects, baseWorld.sects)
-  const migrationRandom = createSeededRandom(`${seed}:v11-migration`)
+  const migrationRandom = createSeededRandom(`${seed}:v12-migration`)
   const migrationYear = typeof oldWorld.currentYear === 'number' ? oldWorld.currentYear : baseWorld.currentYear
   const npcSource = Array.isArray(oldWorld.npcCultivators) ? oldWorld.npcCultivators : Array.isArray(oldWorld.npcs) && oldWorld.npcs.length ? oldWorld.npcs : baseWorld.npcCultivators
   const world: WorldState = {
@@ -310,6 +324,7 @@ export function migrateSave(value: unknown): GameSave {
     logs: Array.isArray(old.logs) ? old.logs as GameSave['logs'] : [], pendingEvent: old.pendingEvent && typeof old.pendingEvent === 'object' ? old.pendingEvent as GameSave['pendingEvent'] : null,
     pendingLifeEvent: old.pendingLifeEvent && typeof old.pendingLifeEvent === 'object' ? old.pendingLifeEvent as GameSave['pendingLifeEvent'] : null,
     currentAction: old.currentAction && typeof old.currentAction === 'object' && Object.values(CultivationAction).includes(record(old.currentAction).action as CultivationAction) ? old.currentAction as GameSave['currentAction'] : null,
+    pendingCombat: old.pendingCombat && typeof old.pendingCombat === 'object' ? old.pendingCombat as GameSave['pendingCombat'] : null,
   }
   if (save.player && !save.world.families.some((family) => family.id === save.player!.familyId)) {
     save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [] })
