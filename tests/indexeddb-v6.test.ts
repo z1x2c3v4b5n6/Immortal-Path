@@ -4,6 +4,7 @@ import { SaveService } from '../src/core/save/SaveService'
 import { acquireSpiritRoot } from '../src/core/aptitude/aptitude'
 import { saveFixture } from './fixtures'
 import { CharacterState, CultivationAction } from '../src/models'
+import { CURRENT_SAVE_VERSION } from '../src/core/save/serialization'
 
 describe('V3.5 IndexedDB persistence', () => {
   afterEach(async () => SaveService.remove())
@@ -26,7 +27,7 @@ describe('V3.5 IndexedDB persistence', () => {
     save.player!.inheritanceHistory.push({ eventId: 'cave', name: '风雷遁甲经', year: 155, source: '古修传承' })
     await SaveService.save(save)
     const restored = await SaveService.load()
-    expect(restored?.version).toBe(12)
+    expect(restored?.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored?.player?.spiritualAptitude.acquiredRoots[0]).toMatchObject({ element: '雷', purity: 81, stability: 67 })
     expect(restored?.player?.activeTechnique).toBe('thunder-sword')
     expect(restored?.player?.techniqueProgress[0]).toMatchObject({ techniqueId: 'thunder-sword', level: 3 })

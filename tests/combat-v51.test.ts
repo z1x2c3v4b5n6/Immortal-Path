@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { combatDisplayAssessment, combatVisualProfile, enemyVisualType, playbackRounds } from '../src/core/combat/combatPresentation'
 import { SaveService } from '../src/core/save/SaveService'
-import { deserializeSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, serializeSave } from '../src/core/save/serialization'
 import { router } from '../src/router'
 import { useGameStore } from '../src/stores/game'
 import { CharacterState, CombatStrategy, type CombatContext, type CombatRound } from '../src/models'
@@ -129,7 +129,7 @@ describe('V5.1 battle presentation', () => {
     game.startCombat('beast', 0, 'adventure', '青云山脉', undefined, adventureContext)
     const result = game.resolvePendingCombat(CombatStrategy.BALANCED, undefined, 'victory')!
     const restored = deserializeSave(serializeSave(game.state))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.player?.combatHistory[0]).toMatchObject({ id: result.id, context: adventureContext, injury: result.injury })
     await SaveService.save(game.state)
     const indexed = await SaveService.load()

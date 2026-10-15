@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { afterEach, describe, expect, it } from 'vitest'
 import { saveFixture } from './fixtures'
+import { CURRENT_SAVE_VERSION } from '../src/core/save/serialization'
 
 describe('V11 to V12 IndexedDB upgrade', () => {
   afterEach(async () => {
@@ -42,7 +43,7 @@ describe('V11 to V12 IndexedDB upgrade', () => {
 
     const { SaveService } = await import('../src/core/save/SaveService')
     const restored = await SaveService.load()
-    expect(restored?.version).toBe(12)
+    expect(restored?.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored?.player).toMatchObject({ eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [] })
     expect(restored?.player).toMatchObject({ discipleIds: [], socialHistory: [] })
     expect(restored?.player).toMatchObject({ combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [] })

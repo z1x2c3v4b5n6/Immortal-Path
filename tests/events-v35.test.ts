@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { checkLifeEvents } from '../src/core/lifeEvents/eventResolver'
 import { calculateEventRisk, calculateRewardLevel, eventDeathCategory, opportunityWeightMultiplier, resolveEventRisk, riskLevelName, riskStars } from '../src/core/lifeEvents/eventRisk'
 import { RandomService } from '../src/core/random/RandomService'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { LIFE_EVENTS } from '../src/data/lifeEvents'
 import { useGameStore } from '../src/stores/game'
 import { playerFixture, saveFixture, worldFixture } from './fixtures'
@@ -117,7 +117,7 @@ describe('V3.5 opportunity migration and recovery under the current save schema'
     const save = saveFixture()
     const { eventRiskHistory: _risks, deathCause: _death, dangerRecords: _danger, majorOpportunities: _major, inheritanceHistory: _inheritance, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 9, player: legacyPlayer })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.player).toMatchObject({ eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [] })
     expect(migrated.player!.deathCause).toBeUndefined()
   })
@@ -130,7 +130,7 @@ describe('V3.5 opportunity migration and recovery under the current save schema'
     save.player!.inheritanceHistory.push({ eventId: 'cave', name: '风雷遁甲经', year: 120, source: '古修传承' })
     save.player!.deathCause = { category: 'restriction', description: '触发洞府禁制', eventId: 'cave' }
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.player!.eventRiskHistory).toEqual(save.player!.eventRiskHistory)
     expect(restored.player!.dangerRecords).toEqual(save.player!.dangerRecords)
     expect(restored.player!.majorOpportunities).toEqual(save.player!.majorOpportunities)

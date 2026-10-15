@@ -10,7 +10,7 @@ import { sectPositionForRealm, sectRankName } from '../src/core/sect/sect'
 import { generateTerritories, simulateTerritories } from '../src/core/world/territories'
 import { createWorld, simulateWorld } from '../src/core/world/world'
 import { LIFE_EVENTS } from '../src/data/lifeEvents'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { createLifeRecord } from '../src/core/reincarnation/reincarnation'
 import { useGameStore } from '../src/stores/game'
 import type { Relationship } from '../src/models'
@@ -169,7 +169,7 @@ describe('V4 social data migration and JSON', () => {
     oldWorld.sects = oldWorld.sects.map(({ id, name, power, status }) => ({ id, name, power, status })) as typeof oldWorld.sects
     oldWorld.families = oldWorld.families.map(({ kind: _kind, resources: _resources, fame: _fame, territory: _territory, history: _history, ...family }) => family) as typeof oldWorld.families
     const migrated = migrateSave({ ...legacy, version: 10, player, world: oldWorld })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.player).toMatchObject({ discipleIds: [], socialHistory: [] })
     expect(migrated.world.sects.every((sect) => sect.type && sect.location && Array.isArray(sect.techniqueIds))).toBe(true)
     expect(migrated.world.sectRelations.length).toBeGreaterThan(0)
@@ -184,7 +184,7 @@ describe('V4 social data migration and JSON', () => {
     save.player!.socialHistory.push({ id: 'social', year: 120, text: '加入山门', type: 'sect' })
     setRelationship(save.world.relationships, save.player!.id, save.world.npcCultivators[0].id, '好友', 55, 120)
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.player!.sectMembership).toEqual(save.player!.sectMembership)
     expect(restored.player!.socialHistory).toEqual(save.player!.socialHistory)
     expect(restored.world.npcCultivators).toEqual(save.world.npcCultivators)

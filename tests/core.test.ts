@@ -3,7 +3,7 @@ import { calculateBreakthroughChance } from '../src/core/breakthrough/breakthrou
 import { rollLoot } from '../src/core/loot/loot'
 import { RandomService } from '../src/core/random/RandomService'
 import { calculateReincarnationPoints } from '../src/core/reincarnation/reincarnation'
-import { deserializeSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, serializeSave } from '../src/core/save/serialization'
 import { addMonths } from '../src/core/time/time'
 import { REALMS } from '../src/data/realms'
 import { playerFixture, worldFixture } from './fixtures'
@@ -47,7 +47,7 @@ describe('save serialization', () => {
   it('round trips V2 world state', () => {
     const base = deserializeSave(JSON.stringify({ version: 1, world: { currentYear: 300 }, reincarnation: {}, lifeRecords: [] }))
     expect(deserializeSave(serializeSave(base)).world.currentYear).toBe(300)
-    expect(deserializeSave(serializeSave(base)).version).toBe(12)
+    expect(deserializeSave(serializeSave(base)).version).toBe(CURRENT_SAVE_VERSION)
   })
   it('rejects unrelated JSON', () => expect(() => deserializeSave('{"hello":true}')).toThrow())
 })

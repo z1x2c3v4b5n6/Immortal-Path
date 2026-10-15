@@ -39,7 +39,7 @@ const rewardName = (id: string) => itemById(id)?.name ?? id
           <div v-else><span class="eyebrow">READY</span><h2>{{ run.currentDepth ? '继续向深处行进' : '踏入第一层' }}</h2><p>每一层会产生资源、事件、禁制、宝物或嵌入式战斗。</p></div>
           <div class="realm-run-actions">
             <button v-if="run.status === 'ACTIVE' && !run.awaitingDecision && !run.pendingEncounter" class="primary" @click="game.exploreSecretRealm">探索下一层</button>
-            <button v-if="run.status === 'ACTIVE' && run.awaitingDecision" class="primary" @click="game.continueSecretRealm">继续深入</button>
+            <template v-if="run.status === 'ACTIVE' && run.awaitingDecision"><button v-for="route in run.routeChoices" :key="route.id" class="primary route-choice" @click="() => game.continueSecretRealm(route.id)"><b>{{ route.name }}</b><small>风险 {{ route.riskModifier >= 0 ? '+' : '' }}{{ route.riskModifier }} · 奖励 {{ route.rewardModifier >= 0 ? '+' : '' }}{{ route.rewardModifier }}</small></button></template>
             <button v-if="run.status === 'ACTIVE' || run.status === 'CLEARED'" class="button" @click="game.leaveSecretRealm">{{ run.status === 'CLEARED' ? '带回全部战利品' : '撤离秘境' }}</button>
           </div>
         </div>

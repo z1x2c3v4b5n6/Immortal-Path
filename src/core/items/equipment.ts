@@ -1,5 +1,5 @@
 import { itemById } from '../../data/items'
-import type { ArtifactActiveEffect, EquipmentSlot, ItemDefinition, ItemEffect, ItemEffectType, Player } from '../../models'
+import type { ArtifactActiveEffect, BattleCard, EquipmentSlot, ItemDefinition, ItemEffect, ItemEffectType, Player } from '../../models'
 
 export const emptyEquipment = () => ({ artifactSlots: [] as string[] })
 
@@ -42,8 +42,17 @@ export function itemCombatContribution(player: Player, item: ItemDefinition) {
 
 export function equipmentCombatContribution(player: Player) {
   const base = equippedItems(player).reduce((sum, item) => sum + itemCombatContribution(player, item), 0)
-  const bond = player.boundArtifact ? Math.round(Math.min(80, player.boundArtifact.nourishment / 20 + player.boundArtifact.affinity / 4)) : 0
+  const bond = player.boundArtifact ? Math.round(Math.min(80, player.boundArtifact.nourishment / 20 + player.boundArtifact.affinity / 4) + boundArtifactStage(player).combatBonus) : 0
   return base + bond
+}
+
+export function boundArtifactStage(player: Player) {
+  const affinity = player.boundArtifact?.affinity ?? 0
+  if (affinity >= 100) return { id: 4, name: '人器合一', combatBonus: 20, activeBonus: .10 }
+  if (affinity >= 75) return { id: 3, name: '如臂使指', combatBonus: 13, activeBonus: .07 }
+  if (affinity >= 50) return { id: 2, name: '心意相通', combatBonus: 8, activeBonus: .04 }
+  if (affinity >= 25) return { id: 1, name: '初步认主', combatBonus: 4, activeBonus: .02 }
+  return { id: 0, name: '初炼', combatBonus: 0, activeBonus: 0 }
 }
 
 export function itemPathFit(player: Player, item: ItemDefinition) {
@@ -86,10 +95,10 @@ export function unequipItem(player: Player, itemId: string) {
 
 export function isEquipped(player: Player, itemId: string) { return equippedItemIds(player).includes(itemId) }
 
-export function bindArtifact(player: Player, artifactId: string, year: number) {
+export function bindArtifact(player: Player, artifactId: string, year: number, legacy?: { formerOwners: string[]; totalNourishment: number; legacyLevel: number }) {
   const item = itemById(artifactId)
   if (player.boundArtifact || player.realmIndex < 11 || !item?.artifact || !player.inventory.some((entry) => entry.itemId === artifactId && entry.quantity > 0)) return false
-  player.boundArtifact = { artifactId, bondedAtYear: year, nourishment: 0, affinity: Math.max(10, 36 + itemPathFit(player, item).score * 9) }
+  player.boundArtifact = { artifactId, bondedAtYear: year, nourishment: 0, affinity: Math.max(10, 30 + itemPathFit(player, item).score * 8 + (legacy?.legacyLevel ?? 0) * 2), formerOwners: legacy?.formerOwners ?? [], totalNourishment: legacy?.totalNourishment ?? 0, legacyLevel: legacy?.legacyLevel ?? 0 }
   if (!isEquipped(player, artifactId)) equipItem(player, artifactId)
   return true
 }
@@ -99,10 +108,23 @@ export function unbindArtifact(player: Player) { if (!player.boundArtifact) retu
 export function nourishBoundArtifact(player: Player, amount: number, affinity = Math.max(1, Math.floor(amount / 20))) {
   if (!player.boundArtifact || amount <= 0) return false
   player.boundArtifact.nourishment = Math.max(0, player.boundArtifact.nourishment + Math.floor(amount))
+  player.boundArtifact.totalNourishment += Math.floor(amount)
+  player.boundArtifact.legacyLevel = Math.min(5, Math.floor(player.boundArtifact.totalNourishment / 120))
   player.boundArtifact.affinity = Math.max(0, Math.min(100, player.boundArtifact.affinity + affinity))
   return true
 }
 
 export function activeArtifactEffects(player: Player): ArtifactActiveEffect[] {
   return equippedItems(player).map((item) => item.artifact?.activeEffect).filter((effect): effect is ArtifactActiveEffect => Boolean(effect))
+}
+
+export function artifactBattleCard(player: Player, itemId: string): BattleCard | undefined {
+  if (!isEquipped(player, itemId)) return undefined
+  const item = itemById(itemId)
+  const active = item?.artifact?.activeEffect
+  if (!item || !active) return undefined
+  const stage = player.boundArtifact?.artifactId === itemId ? boundArtifactStage(player).activeBonus : 0
+  const boosted = active.value * (1 + stage)
+  const values = active.type === 'POWER_BURST' ? { powerMultiplier: boosted, defenseMultiplier: 0, escapeBonus: 0 } : active.type === 'SOUL_DISRUPTION' ? { powerMultiplier: boosted * .55, defenseMultiplier: .06, escapeBonus: 0 } : active.type === 'ESCAPE' ? { powerMultiplier: 0, defenseMultiplier: .04, escapeBonus: boosted } : active.type === 'PROTECTION' ? { powerMultiplier: 0, defenseMultiplier: boosted, escapeBonus: .04 } : { powerMultiplier: .05, defenseMultiplier: .1, escapeBonus: .08 }
+  return { id: `artifact:${item.id}`, name: item.name, type: 'artifact', description: active.description, ...values, lifespanCost: 0, charges: 1 }
 }

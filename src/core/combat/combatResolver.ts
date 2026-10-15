@@ -40,7 +40,8 @@ export function combatStrengthLabel(playerPower: number, enemyPower: number) {
 export function calculateEscapeChance(player: Player, enemy: CombatEnemy, card?: BattleCard) {
   const realmGap = player.realmIndex - enemy.realmIndex
   const statePenalty = player.characterStates.includes(CharacterState.SERIOUS_INJURY) ? -.22 : player.characterStates.includes(CharacterState.INJURED) ? -.08 : 0
-  return Math.max(.08, Math.min(.95, .5 + realmGap * .07 + player.stats.luck / 500 + player.stats.comprehension / 1000 + (player.spiritRoot.elements.includes('风') ? .12 : 0) + (card?.escapeBonus ?? 0) + equipmentEffectTotal(player, 'ESCAPE_CHANCE') + statePenalty))
+  const agilePenalty = enemy.eliteModifiers?.some((modifier) => modifier.id === 'AGILE') ? -.16 : 0
+  return Math.max(.08, Math.min(.95, .5 + realmGap * .07 + player.stats.luck / 500 + player.stats.comprehension / 1000 + (player.spiritRoot.elements.includes('风') ? .12 : 0) + (card?.escapeBonus ?? 0) + equipmentEffectTotal(player, 'ESCAPE_CHANCE') + statePenalty + agilePenalty))
 }
 
 function pathProfile(player: Player) {
@@ -81,12 +82,15 @@ export function resolveCombat(player: Player, enemy: CombatEnemy, strategyId: Co
 
   const maxRounds = 7
   for (let round = 1; round <= maxRounds && playerHealth > 0 && enemyHealth > 0; round++) {
-    const playerDamage = Math.max(5, Math.round(power * (.085 + rng.random() * .04) - enemy.defense * (.45 + rng.random() * .25)))
+    const swordResistance = enemy.eliteModifiers?.some((modifier) => modifier.id === 'SWORD_BONE') && player.primaryPath === 'sword' ? .82 : 1
+    const playerDamage = Math.max(5, Math.round((power * (.085 + rng.random() * .04) - enemy.defense * (.45 + rng.random() * .25)) * swordResistance))
     enemyHealth = Math.max(0, enemyHealth - playerDamage)
     const equipmentOpening = equippedItems(player).find((item) => item.weaponVisualTag)?.weaponVisualTag ?? equippedItems(player).find((item) => item.artifactVisualTag)?.artifactVisualTag
     rounds.push({ round, actor: 'player', text: round === 1 ? equipmentOpening ?? path.text : player.primaryPath === 'sword' ? '剑势层叠，再次逼近对手命门。' : player.primaryPath === 'body' ? '气血如炉，你挥拳震开护体灵光。' : player.primaryPath === 'demonic' ? '魔气化刃，攻势愈发凶狠。' : player.primaryPath === 'ghost' ? '魂影交错，阴寒术法无声侵袭。' : '灵力流转，术法接踵而至。', damage: playerDamage, playerHealth, enemyHealth })
     if (enemyHealth <= 0) break
-    const enemyDamage = Math.max(4, Math.round(enemyPower * (.08 + rng.random() * .045) - defense * (.36 + rng.random() * .22)))
+    const bloodthirst = enemy.eliteModifiers?.some((modifier) => modifier.id === 'BLOODTHIRSTY') && enemyHealth <= enemyHealthMax * .45 ? 1.28 : 1
+    const soulDevour = enemy.eliteModifiers?.some((modifier) => modifier.id === 'SOUL_DEVOURING') && (player.primaryPath === 'ghost' || player.stats.soul >= 75) ? 1.18 : 1
+    const enemyDamage = Math.max(4, Math.round((enemyPower * (.08 + rng.random() * .045) - defense * (.36 + rng.random() * .22)) * bloodthirst * soulDevour))
     playerHealth = Math.max(0, playerHealth - enemyDamage)
     rounds.push({ round, actor: 'enemy', text: `${enemy.name}催动杀招，攻势直逼护体灵光。`, damage: enemyDamage, playerHealth, enemyHealth })
   }

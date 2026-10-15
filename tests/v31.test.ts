@@ -4,7 +4,7 @@ import { acquireSpiritRoot, calculateFiveElementBalance, createSpiritualAptitude
 import { canUnlockAcquiredTalent, checkAcquiredTalentUnlocks } from '../src/core/talents/acquiredTalents'
 import { calculateTechniqueAffinity, practiceTechnique } from '../src/core/techniques/techniques'
 import { calculateCultivationGain } from '../src/core/cultivation/cultivation'
-import { migrateSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, migrateSave } from '../src/core/save/serialization'
 import { ACQUIRED_TALENTS, acquiredTalentById } from '../src/data/acquiredTalents'
 import { APTITUDE_EVENTS } from '../src/data/events/aptitudeEvents'
 import { createSpiritRoot, STANDARD_ELEMENTS } from '../src/data/spiritRoots'
@@ -223,7 +223,7 @@ describe('V3.1 fields through current save migration', () => {
     const legacy = saveFixture({ version })
     const { spiritualAptitude: _aptitude, acquiredTalents: _talents, knownTechniques: _known, techniqueProgress: _progress, ...legacyPlayer } = legacy.player!
     const migrated = migrateSave({ ...legacy, player: legacyPlayer })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.player?.spiritualAptitude.innateRoot).toMatchObject({ elements: ['水', '木'] })
     expect(migrated.player?.acquiredTalents).toEqual([])
     expect(migrated.player?.knownTechniques).toContain('plain-breath')

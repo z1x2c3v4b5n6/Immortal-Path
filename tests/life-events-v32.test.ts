@@ -9,7 +9,7 @@ import { resolveLifeEventChoice } from '../src/core/lifeEvents/eventOutcome'
 import { addFateTag, addLifeTimelineEntry, createLifeTimelineEntry, importantLifeEvents, recordLifeEvent, removeFateTag } from '../src/core/lifeEvents/eventHistory'
 import { completedFateEvaluation, evaluateFatePaths } from '../src/core/lifeEvents/fatePath'
 import { createLifeRecord } from '../src/core/reincarnation/reincarnation'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { RandomService } from '../src/core/random/RandomService'
 import { useGameStore } from '../src/stores/game'
 import { LifeStage, type LifeEventRecord, type LifeTimelineEntry } from '../src/models'
@@ -190,7 +190,7 @@ describe('V3.2 life-state migration and JSON recovery', () => {
     const save = saveFixture()
     const { lifeEventHistory: _history, fateTags: _tags, fatePaths: _paths, lifeTimeline: _timeline, importantEvents: _important, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 6, player: legacyPlayer, pendingLifeEvent: undefined })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.pendingLifeEvent).toBeNull()
     expect(migrated.player).toMatchObject({ lifeEventHistory: [], fateTags: [], fatePaths: [], lifeTimeline: [], importantEvents: [] })
   })
@@ -203,7 +203,7 @@ describe('V3.2 life-state migration and JSON recovery', () => {
     const entry = createLifeTimelineEntry(save.player!, 120, 2, '救下一位老人。', 'event', 3)
     addLifeTimelineEntry(save.player!, entry)
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.pendingLifeEvent).toEqual({ eventId: 'mountain-elder' })
     expect(restored.player!.lifeEventHistory).toEqual(save.player!.lifeEventHistory)
     expect(restored.player!.fateTags).toEqual(save.player!.fateTags)

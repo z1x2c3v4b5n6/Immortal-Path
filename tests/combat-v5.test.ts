@@ -6,7 +6,7 @@ import { calculateEscapeChance, combatStrengthLabel, elementalCombatModifier, en
 import { unlockBattleAchievements } from '../src/core/combat/combatResult'
 import { generateNPCCultivator } from '../src/core/npc/npcCultivator'
 import { RandomService, createSeededRandom } from '../src/core/random/RandomService'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { useGameStore } from '../src/stores/game'
 import { CharacterState, CombatStrategy, type CombatEnemy } from '../src/models'
 import { createSpiritRoot } from '../src/data/spiritRoots'
@@ -187,7 +187,7 @@ describe('Save V12 combat migration and JSON', () => {
     const { combatPower: _power, combatHistory: _history, battleAchievements: _achievements, equippedArtifacts: _artifacts, battleCards: _cards, battleStats: _stats, ...v11Player } = save.player!
     const { pendingCombat: _pending, ...v11Save } = save
     const migrated = migrateSave({ ...v11Save, version: 11, player: v11Player })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.player).toMatchObject({ combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [] })
     expect(migrated.player!.combatPower).toBeGreaterThan(0)
     expect(migrated.player!.battleStats).toMatchObject({ battles: 0, wins: 0, losses: 0 })
@@ -202,7 +202,7 @@ describe('Save V12 combat migration and JSON', () => {
     save.player!.battleAchievements.push('越级挑战者')
     save.pendingCombat = { enemy: createCombatEnemy(save.player!, 'beast', fixed(), 0), environment: '青云山', source: 'adventure' }
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.player!.equippedArtifacts).toEqual(save.player!.equippedArtifacts)
     expect(restored.player!.battleCards).toEqual(save.player!.battleCards)
     expect(restored.player!.battleAchievements).toEqual(['越级挑战者'])

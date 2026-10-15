@@ -48,7 +48,7 @@ import { combatStrengthLabel, resolveCombat } from '../core/combat/combatResolve
 import { unlockBattleAchievements } from '../core/combat/combatResult'
 import { combatInjuryFromHealth } from '../core/combat/combatPresentation'
 import { CombatStrategy, type CombatContext, type CombatEnemyType, type CombatLoot, type CombatOutcome } from '../models'
-import { bindArtifact, emptyEquipment, equipItem, nourishBoundArtifact, unequipItem, unbindArtifact } from '../core/items/equipment'
+import { artifactBattleCard, bindArtifact, emptyEquipment, equipItem, nourishBoundArtifact, unequipItem, unbindArtifact } from '../core/items/equipment'
 import { decayPillToxicity, recordPill, usePill } from '../core/items/pills'
 import { craftItem } from '../core/items/recipes'
 import { SECRET_REALMS, secretRealmById } from '../data/secretRealms'
@@ -431,6 +431,7 @@ export const useGameStore = defineStore('game', () => {
     if (!current?.sectMembership || !sect || !offering || current.sectMembership.contribution < offering.cost) return false
     current.sectMembership.contribution -= offering.cost
     if (offering.itemId) addItem(offering.itemId, 1, { location: sect.name, source: '宗门贡献兑换' })
+    if (offering.recipeId && !current.knownRecipes.includes(offering.recipeId)) { current.knownRecipes.push(offering.recipeId); timeline(`从${sect.name}获得配方「${RECIPES.find((entry) => entry.id === offering.recipeId)?.name ?? offering.recipeId}」。`, 'life') }
     if (offering.secretRealmId) openSecretRealm(current.secretRealmStates, offering.secretRealmId, `${sect.name}秘境名额`, state.world.currentYear + 10)
     recordSocialMoment(`以 ${offering.cost} 宗门贡献换得「${offering.name}」。`, 'sect', Boolean(offering.secretRealmId))
     scheduleSave()
@@ -767,6 +768,8 @@ export const useGameStore = defineStore('game', () => {
     const realm = secretRealmById(realmId)
     if (!current?.alive || !realm || state.secretRealmRun || state.pendingCombat || !canEnterSecretRealm(current, realm, state.world.currentYear)) return false
     state.secretRealmRun = createSecretRealmRun(realmId)
+    const realmState = current.secretRealmStates.find((entry) => entry.secretRealmId === realmId)
+    if (realmState) realmState.runsThisLife = (realmState.runsThisLife ?? 0) + 1
     timeline(`进入「${realm.name}」，此行战利品将在安全撤离后收入乾坤袋。`, 'event')
     scheduleSave()
     return true
@@ -787,7 +790,8 @@ export const useGameStore = defineStore('game', () => {
         run.eventHistory.push(`${encounter.name}中触动禁制，${serious ? '身受重伤' : '受了轻伤'}。`)
       }
     }
-    completeSecretRealmEncounter(run, encounter)
+    completeSecretRealmEncounter(run, encounter, encounter.rewards, random)
+    if (encounter.recipeId && !current.knownRecipes.includes(encounter.recipeId)) { current.knownRecipes.push(encounter.recipeId); timeline(`在${realm.name}发现配方「${RECIPES.find((entry) => entry.id === encounter.recipeId)?.name ?? encounter.recipeId}」。`, 'life') }
     timeline(`秘境第${run.currentDepth}层「${encounter.name}」探索完成。`, encounter.type === 'TREASURE' ? 'loot' : 'event')
     scheduleSave()
     return true
@@ -808,9 +812,9 @@ export const useGameStore = defineStore('game', () => {
     return true
   }
 
-  function continueSecretRealm() {
+  function continueSecretRealm(routeId?: string) {
     const run = state.secretRealmRun
-    if (!run || !continueRealmRun(run)) return false
+    if (!run || !continueRealmRun(run, routeId, random, state.player ?? undefined)) return false
     scheduleSave()
     return true
   }
@@ -824,11 +828,19 @@ export const useGameStore = defineStore('game', () => {
     for (const reward of run.collectedRewards) addItem(reward.itemId, reward.quantity, { location: `${realm.name}第${run.currentDepth}层`, source: status === 'CLEARED' ? '秘境通关' : '秘境撤离' })
     current.secretRealmHistory.unshift(createSecretRealmHistory(run, state.world.currentYear))
     if (status === 'CLEARED') {
-      const first = current.secretRealmHistory.filter((entry) => entry.secretRealmId === realm.id && entry.status === 'CLEARED').length === 1
-      if (first) recordLifeMoment(`首次通关${realm.name}，从最深处带回传承。`, 'inheritance', 4)
+      const realmState = current.secretRealmStates.find((entry) => entry.secretRealmId === realm.id)
+      if (realmState && !realmState.firstClearCompleted) {
+        realmState.firstClearCompleted = true
+        const reward = realm.id === 'myriad-sword' ? 'frost-edge-sword' : realm.id === 'nether-tomb' ? 'soul-calming-bell' : realm.id === 'five-element-ruins' ? 'five-element-orb' : 'artifact-embryo'
+        addItem(reward, 1, { location: realm.name, source: '秘境首通奖励' })
+        current.fateTags.push({ id: `REALM_FIRST_CLEAR_${realm.id}`, name: `${realm.name}首通者`, description: '击败秘境最终守关者获得的声名。', createdAt: state.world.currentYear })
+        recordLifeMoment(`首次通关${realm.name}，从最深处带回传承。`, 'inheritance', 4)
+      }
       timeline(`通关${realm.name}，安全带回全部战利品。`, 'realm')
     } else timeline(`从${realm.name}第${run.currentDepth}层主动撤离，安全带回战利品。`, 'loot')
     state.secretRealmRun = null
+    const realmState = current.secretRealmStates.find((entry) => entry.secretRealmId === realm.id)
+    if (realmState) realmState.cooldownUntilYear = state.world.currentYear + (status === 'CLEARED' ? 4 : 2)
     scheduleSave()
     return true
   }
@@ -879,12 +891,14 @@ export const useGameStore = defineStore('game', () => {
     const stonesBefore = current.spiritStones
     const cultivationBefore = current.cultivation
     const inventoryBefore = new Map(current.inventory.map((entry) => [entry.itemId, entry.quantity]))
-    const card = battleCardId ? current.battleCards.find((entry) => entry.id === battleCardId && entry.charges > 0) : undefined
+    const card = battleCardId ? current.battleCards.find((entry) => entry.id === battleCardId && entry.charges > 0) ?? (battleCardId.startsWith('artifact:') ? artifactBattleCard(current, battleCardId.slice('artifact:'.length)) : undefined) : undefined
     const record = resolveCombat(current, pending.enemy, strategy, pending.environment, state.world, random, { battleCard: card, forceOutcome })
     record.context = pending.context
     if (pending.source === 'sect' && record.outcome === 'death') { record.outcome = 'defeat'; record.summary = `切磋不敌${pending.enemy.name}，被同门及时救下。` }
     if (card) {
-      card.charges--
+      const ownedCard = current.battleCards.find((entry) => entry.id === card.id)
+      if (ownedCard) ownedCard.charges--
+      if (card.type === 'artifact') record.rounds.unshift({ round: 0, actor: 'player', text: `祭起法宝「${card.name}」：${card.description}`, damage: 0, playerHealth: record.playerHealthMax ?? 0, enemyHealth: record.enemyHealthMax ?? 0 })
       if (card.lifespanCost) {
         current.lifespanBonusMonths -= card.lifespanCost
         current.lifespanMonths = calculateMaxLifespanMonths(current)
@@ -957,7 +971,7 @@ export const useGameStore = defineStore('game', () => {
     if (pending.source === 'secretRealm' && state.secretRealmRun?.pendingEncounter) {
       const encounter = state.secretRealmRun.pendingEncounter
       if (record.outcome === 'victory') {
-        completeSecretRealmEncounter(state.secretRealmRun, encounter)
+        completeSecretRealmEncounter(state.secretRealmRun, encounter, encounter.rewards, random)
         for (const reward of encounter.rewards) record.loot.push({ id: reward.itemId, name: itemById(reward.itemId)?.name ?? reward.itemId, quantity: reward.quantity, type: 'item' })
       } else if (record.outcome !== 'death') {
         state.secretRealmRun.eventHistory.push(`第${state.secretRealmRun.currentDepth}层与${record.enemyName}交锋后负伤退开。`)
@@ -1085,7 +1099,7 @@ export const useGameStore = defineStore('game', () => {
     if (current.boundArtifact && !family.inheritedArtifacts?.some((entry) => entry.ownerId === current.id && entry.artifactId === current.boundArtifact!.artifactId)) {
       const definition = itemById(current.boundArtifact.artifactId)
       family.inheritedArtifacts ??= []
-      family.inheritedArtifacts.push({ artifactId: current.boundArtifact.artifactId, artifactName: definition?.name ?? current.boundArtifact.artifactId, ownerName: current.name, ownerId: current.id, nourishment: current.boundArtifact.nourishment, affinity: current.boundArtifact.affinity, sourceHistory: current.itemSourceHistory.filter((entry) => entry.itemId === current.boundArtifact!.artifactId).map((entry) => ({ ...entry, inheritedFrom: current.name })) })
+      family.inheritedArtifacts.push({ artifactId: current.boundArtifact.artifactId, artifactName: definition?.name ?? current.boundArtifact.artifactId, ownerName: current.name, ownerId: current.id, nourishment: current.boundArtifact.nourishment, affinity: current.boundArtifact.affinity, sourceHistory: current.itemSourceHistory.filter((entry) => entry.itemId === current.boundArtifact!.artifactId).map((entry) => ({ ...entry, inheritedFrom: current.name })), formerOwners: [...current.boundArtifact.formerOwners, current.name], totalNourishment: current.boundArtifact.totalNourishment, legacyLevel: current.boundArtifact.legacyLevel })
       mergeInventory(family.inventory, [{ itemId: current.boundArtifact.artifactId, quantity: 1 }])
       family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${definition?.name ?? '本命法宝'}成为${family.name}传承法宝，曾为${current.name}本命之物。`, type: 'family' })
     }

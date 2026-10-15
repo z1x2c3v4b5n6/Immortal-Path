@@ -102,7 +102,9 @@ export interface BattleCard { id: string; name: string; type: BattleCardType; de
 export interface EquippedArtifact { id: string; name: string; slot: ArtifactSlot; attack: number; defense: number; power: number; element?: SpiritElement; specialEffect?: string }
 export interface BattleStats { battles: number; wins: number; losses: number; escapes: number; kills: number; beastKills: number; upsetWins: number; winStreak: number; experience: number }
 export interface CombatPowerBreakdown { realm: number; technique: number; root: number; stats: number; talents: number; path: number; artifacts: number; state: number; experience: number; total: number }
-export interface CombatEnemy { id: string; name: string; type: CombatEnemyType; realmIndex: number; path: CultivationPathId; elements: SpiritElement[]; combatPower: number; attack: number; defense: number; health: number; description: string; recommendedRealmIndex: number; npcId?: string; rewardStones: number; rewardItemId?: string }
+export type EliteModifierId = 'BERSERK' | 'ARMORED' | 'BLOODTHIRSTY' | 'AGILE' | 'SWORD_BONE' | 'SOUL_DEVOURING'
+export interface EliteModifier { id: EliteModifierId; name: string; description: string }
+export interface CombatEnemy { id: string; name: string; type: CombatEnemyType; realmIndex: number; path: CultivationPathId; elements: SpiritElement[]; combatPower: number; attack: number; defense: number; health: number; description: string; recommendedRealmIndex: number; npcId?: string; rewardStones: number; rewardItemId?: string; eliteModifiers?: EliteModifier[]; visualTag?: string }
 export interface CombatRound { round: number; actor: 'player' | 'enemy'; text: string; damage: number; playerHealth: number; enemyHealth: number }
 export type CombatSourceType = 'ADVENTURE' | 'LIFE_EVENT' | 'SECT_EVENT' | 'FAMILY_EVENT' | 'NPC_DUEL' | 'SECRET_REALM' | 'DEBUG'
 export type EnemyVisualType = 'wolf' | 'beast' | 'rogue' | 'cultivator' | 'demonic' | 'ghost'
@@ -196,9 +198,9 @@ export type PillEffectType = 'CULTIVATION' | 'BREAKTHROUGH' | 'HEAL' | 'PROTECT_
 export interface PillEffect { type: PillEffectType; value: number; target?: string; description: string }
 export interface PillDefinition { id: string; name: string; grade: ItemQuality; description: string; effects: PillEffect[]; cooldown?: number; toxicity?: number }
 export interface ConsumedPillRecord { pillId: string; year: number; effectiveValue: number; toxicityAdded: number }
-export interface BoundArtifactState { artifactId: string; bondedAtYear: number; nourishment: number; affinity: number }
+export interface BoundArtifactState { artifactId: string; bondedAtYear: number; nourishment: number; affinity: number; formerOwners: string[]; totalNourishment: number; legacyLevel: number }
 export interface ItemSourceRecord { itemId: string; year: number; location: string; source: string; inheritedFrom?: string }
-export interface ArtifactLegacyRecord { artifactId: string; artifactName: string; ownerName: string; ownerId: string; nourishment: number; affinity: number; sourceHistory: ItemSourceRecord[] }
+export interface ArtifactLegacyRecord { artifactId: string; artifactName: string; ownerName: string; ownerId: string; nourishment: number; affinity: number; sourceHistory: ItemSourceRecord[]; formerOwners: string[]; totalNourishment: number; legacyLevel: number }
 export interface RecipeMaterial { itemId: string; amount: number }
 export interface RecipeRequirement { type: 'REALM' | 'PATH' | 'SECT'; value: string | number }
 export interface Recipe { id: string; name: string; resultItemId: string; resultAmount: number; materials: RecipeMaterial[]; requirements?: RecipeRequirement[] }
@@ -206,10 +208,11 @@ export interface Recipe { id: string; name: string; resultItemId: string; result
 export type SecretRealmRunStatus = 'ACTIVE' | 'ESCAPED' | 'CLEARED' | 'FAILED'
 export type SecretRealmEncounterType = 'RESOURCE' | 'COMBAT' | 'EVENT' | 'TREASURE' | 'HAZARD'
 export interface InventoryReward { itemId: string; quantity: number }
-export interface SecretRealmEncounter { id: string; name: string; description: string; type: SecretRealmEncounterType; risk: number; enemyType?: CombatEnemyType; enemyDifficulty?: number; rewards: InventoryReward[]; injuryChance?: number }
+export interface SecretRealmEncounter { id: string; name: string; description: string; type: SecretRealmEncounterType; risk: number; enemyType?: CombatEnemyType; enemyDifficulty?: number; rewards: InventoryReward[]; injuryChance?: number; isBoss?: boolean; visualTag?: string; recipeId?: string; tags?: string[] }
 export interface SecretRealmDefinition { id: string; name: string; description: string; recommendedRealm: string; recommendedRealmIndex: number; recommendedCombatPower?: number; maxDepth: number; environmentTags: string[]; preferredPaths: CultivationPathId[]; encounters: SecretRealmEncounter[] }
-export interface SecretRealmRun { secretRealmId: string; currentDepth: number; status: SecretRealmRunStatus; collectedRewards: InventoryReward[]; injuries: string[]; eventHistory: string[]; pendingEncounter?: SecretRealmEncounter; awaitingDecision: boolean }
-export interface SecretRealmState { secretRealmId: string; discovered: boolean; accessUntilYear?: number; source: string }
+export interface SecretRealmRouteChoice { id: string; name: string; description: string; riskModifier: number; rewardModifier: number; encounterTags: string[]; hiddenChance: number }
+export interface SecretRealmRun { secretRealmId: string; currentDepth: number; status: SecretRealmRunStatus; collectedRewards: InventoryReward[]; injuries: string[]; eventHistory: string[]; pendingEncounter?: SecretRealmEncounter; awaitingDecision: boolean; routeChoices?: SecretRealmRouteChoice[]; selectedRoute?: SecretRealmRouteChoice; bossDefeated?: boolean; hiddenLayer?: boolean }
+export interface SecretRealmState { secretRealmId: string; discovered: boolean; accessUntilYear?: number; source: string; firstClearCompleted?: boolean; cooldownUntilYear?: number; runsThisLife?: number }
 export interface SecretRealmHistoryRecord { secretRealmId: string; year: number; deepestDepth: number; status: SecretRealmRunStatus; rewards: InventoryReward[] }
 
 export interface Player {

@@ -5,7 +5,7 @@ import { addCharacterState, cultivationStateMultiplier, initialCultivationResour
 import { resolveCultivationAction } from '../src/core/actions/actionResolver'
 import { calculateBreakthroughChance, checkBreakthroughRequirements } from '../src/core/breakthrough/breakthrough'
 import { RandomService } from '../src/core/random/RandomService'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { REALMS } from '../src/data/realms'
 import { BodyRealm, CharacterState, CultivationAction } from '../src/models'
 import { useGameStore } from '../src/stores/game'
@@ -153,7 +153,7 @@ describe('cultivation migration and JSON', () => {
     const save = saveFixture()
     const { cultivationLogs: _logs, resources: _resources, characterStates: _states, breakthroughHistory: _history, breakthroughProgress: _progress, bodyRealm: _bodyRealm, bodyTrainingProgress: _bodyProgress, ...legacyPlayer } = save.player!
     const migrated = migrateSave({ ...save, version: 7, currentAction: undefined, player: legacyPlayer })
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.currentAction).toBeNull()
     expect(migrated.player).toMatchObject({ cultivationLogs: [], resources: initialCultivationResources(), characterStates: [CharacterState.NORMAL], breakthroughHistory: [], breakthroughProgress: 0, bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0 })
   })
@@ -165,7 +165,7 @@ describe('cultivation migration and JSON', () => {
     save.player!.cultivationLogs.push({ id: 'log', year: 120, month: 1, action: CultivationAction.MEDITATION, years: 3, title: '静室修行', summary: '修为增长。', cultivationGain: 300, techniqueExperience: 20, resultType: 'ordinary', importance: 1 })
     save.player!.breakthroughHistory.push({ id: 'break', year: 120, month: 1, fromRealm: '凡人', toRealm: '炼气 1层', success: true, chance: .8, result: '成功', lifespanBefore: 1200, lifespanAfter: 1800 })
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.currentAction?.action).toBe(CultivationAction.MEDITATION)
     expect(restored.player!.resources.spiritHerbs).toBe(7)
     expect(restored.player!.characterStates).toEqual([CharacterState.BOTTLENECK])

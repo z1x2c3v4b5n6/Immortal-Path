@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, deserializeSave, migrateSave, serializeSave } from '../src/core/save/serialization'
 import { saveFixture } from './fixtures'
 
 function legacySave(version: number) {
@@ -21,7 +21,7 @@ function legacySave(version: number) {
 describe('complete legacy migration chain', () => {
   it.each([1, 2, 3, 4, 5])('migrates V%i to V12 with stable world and path defaults', (version) => {
     const migrated = migrateSave(legacySave(version))
-    expect(migrated.version).toBe(12)
+    expect(migrated.version).toBe(CURRENT_SAVE_VERSION)
     expect(migrated.world.seed).toMatch(/^LG-/)
     expect(migrated.world.continent.traits.length).toBeGreaterThanOrEqual(3)
     expect(migrated.player?.pathResources.maxQiBlood).toBe(100)
@@ -42,7 +42,7 @@ describe('complete legacy migration chain', () => {
     save.player!.pathProgress = [{ pathId: 'sword', experience: 240, level: 2 }]
     save.player!.pathResources.swordIntent = 88
     const restored = deserializeSave(serializeSave(save))
-    expect(restored.version).toBe(12)
+    expect(restored.version).toBe(CURRENT_SAVE_VERSION)
     expect(restored.world.seed).toBe(save.world.seed)
     expect(restored.world.continent).toEqual(save.world.continent)
     expect(restored.player?.primaryPath).toBe('sword')

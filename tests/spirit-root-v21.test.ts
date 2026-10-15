@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { calculateTechniqueAffinity, getSpiritRootBreakthroughModifier } from '../src/core/spiritRoot/spiritRoot'
 import { availableTalents, isManualSpiritRootAllowed, manualRootPolicy } from '../src/core/creation/creation'
 import { applyFatePurchase, initialReincarnation } from '../src/core/reincarnation/reincarnation'
-import { migrateSave } from '../src/core/save/serialization'
+import { CURRENT_SAVE_VERSION, migrateSave } from '../src/core/save/serialization'
 import { createSpiritRoot, formatSpiritRootName, ROOT_COUNT_RULES } from '../src/data/spiritRoots'
 
 describe('V2.1 spirit-root breadth and specialization', () => {
@@ -107,7 +107,7 @@ function legacySave(version: number, spiritRoot: Record<string, unknown>, reinca
 describe('V4 spirit-root migration', () => {
   it('migrates a V3 dual root and old permissions to the new fields', () => {
     const save = migrateSave(legacySave(3, { name: '水木双灵根', rank: 4, multiplier: 1.22, elements: ['水', '木'] }, { rareEventCount: 4, selections: { maxRootRank: 7 } }))
-    expect(save.version).toBe(12)
+    expect(save.version).toBe(CURRENT_SAVE_VERSION)
     expect(save.player?.spiritRoot).toMatchObject({ elements: ['水', '木'], quality: 'NORMAL', cultivationMultiplier: 1.10, specializationMultiplier: 1.22, breakthroughModifier: .025, statPointBonus: 5 })
     expect(save.reincarnation.rareEventCount).toBe(0)
     expect(save.reincarnation.rareLootCount).toBe(4)
