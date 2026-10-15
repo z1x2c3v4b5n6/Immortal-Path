@@ -7,7 +7,7 @@ import { selectEventOutcome } from '../core/events/outcomes'
 import { agingStage, calculateMaxLifespanMonths, isNaturalLifespanExpired, isSoulDispersed } from '../core/lifespan/lifespan'
 import { rollLoot } from '../core/loot/loot'
 import { addPathExperience, addSecondaryPath, applyPathTraining, burnLifespanForCultivation, choosePrimaryPath as choosePath, initialPathResources, pathProgress } from '../core/paths/paths'
-import { random } from '../core/random/RandomService'
+import { createSeededRandom, random } from '../core/random/RandomService'
 import { applyFatePurchase, calculateReincarnationPoints, canPurchaseFate, createLifeRecord, defaultSelections, type FatePurchase, initialReincarnation } from '../core/reincarnation/reincarnation'
 import { CURRENT_SAVE_VERSION, migrateSave } from '../core/save/serialization'
 import { SaveService } from '../core/save/SaveService'
@@ -56,6 +56,12 @@ import { canEnterSecretRealm, completeSecretRealmEncounter, continueSecretRealm 
 import { sectOfferings } from '../data/sectOfferings'
 import { pillById } from '../data/pills'
 import { RECIPES } from '../data/recipes'
+import { initialProfessionProgress } from '../core/professions/professions'
+import { craftingChance, resolveCraft } from '../core/professions/crafting'
+import { initialEconomyState, simulateEconomy } from '../core/economy/economySimulation'
+import { initialMarketState, refreshMarket, refreshListingPrices } from '../core/economy/market'
+import { buyMarketItem as executeMarketBuy, sellMarketItem as executeMarketSell } from '../core/economy/trade'
+import { advanceAuctionRound, consignAuctionItem as executeConsignment, createAuction, initialAuctionState, placePlayerBid as executeAuctionBid, settleAuction } from '../core/economy/auction'
 
 function emptySave(): GameSave {
   const now = new Date().toISOString()
@@ -63,6 +69,7 @@ function emptySave(): GameSave {
     id: 'main', version: CURRENT_SAVE_VERSION, createdAt: now, updatedAt: now, player: null, world: createWorld(), lifeRecords: [],
     reincarnation: initialReincarnation(), settings: { fortunateMode: true, autoSave: true, logLimit: 120 },
     pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0 }, logs: [], pendingEvent: null, pendingLifeEvent: null, currentAction: null, pendingCombat: null, secretRealmRun: null,
+    economy: initialEconomyState(100), market: initialMarketState(100), auction: initialAuctionState(100),
   }
 }
 
@@ -104,6 +111,7 @@ export const useGameStore = defineStore('game', () => {
   const canBecomeGhost = computed(() => Boolean(state.player && !state.player.alive && state.player.primaryPath !== 'ghost'))
   const eligibleDescendants = computed(() => state.world.descendants.filter((descendant) => descendant.alive && !descendant.isPlayer && descendant.ageMonths >= 16 * 12 && descendant.parents.includes(state.player?.id ?? '')))
   const isFirstGeneration = computed(() => state.lifeRecords.length === 0)
+  const knownProfessionRecipes = computed(() => RECIPES.filter((recipe) => state.player?.knownRecipes.includes(recipe.id)))
 
   function replaceState(save: GameSave) { Object.assign(state, migrateSave(structuredClone(save))) }
   function timeline(text: string, type: TimelineEvent['type'] = 'life') {
@@ -188,6 +196,9 @@ export const useGameStore = defineStore('game', () => {
     if (state.player || state.lifeRecords.length) return false
     const replacement = createWorld(seed)
     state.world = replacement
+    state.economy = initialEconomyState(replacement.currentYear)
+    state.market = initialMarketState(replacement.currentYear)
+    state.auction = initialAuctionState(replacement.currentYear)
     scheduleSave()
     return true
   }
@@ -234,6 +245,11 @@ export const useGameStore = defineStore('game', () => {
     const master = masterLink && state.world.npcCultivators.find((entry) => entry.id === masterLink.masterId)
     if (masterLink && master && !master.alive) { masterLink.status = 'ended'; recordSocialMoment(`师父${master.name}寿尽坐化，师徒缘分止于此年。`, 'relationship', true) }
     addMonths(state.world, months)
+    if (simulateEconomy(state.economy, state.market, state.world)) {
+      refreshMarket(state.market, state.world, createSeededRandom(`${state.world.seed}:market:${state.world.currentYear}:${state.market.cycle}`), state.player ?? undefined)
+      refreshListingPrices(state.market, state.world, state.player ?? undefined)
+      if (state.auction.status !== 'OPEN' && state.world.currentYear >= state.auction.nextAuctionYear) state.auction = createAuction(state.world, createSeededRandom(`${state.world.seed}:auction:${state.world.currentYear}`), state.auction)
+    }
     state.player.ageMonths += months
     decayPillToxicity(state.player, months)
     const sect = sectById(state.world.sects, state.player.sectMembership?.sectId)
@@ -1096,6 +1112,10 @@ export const useGameStore = defineStore('game', () => {
     family.reputation += current.realmIndex * 2 + current.achievements.length * 5
     family.resources += Math.floor(current.spiritStones * .2)
     family.fame = Math.min(100, family.fame + current.realmIndex)
+    for (const progress of current.professionProgress.filter((entry) => entry.level >= 80)) {
+      const name = progress.id === 'ALCHEMY' ? '丹道' : progress.id === 'REFINING' ? '器道' : '商道'
+      if (!family.history.some((entry) => entry.text.includes(`${current.name}为${name}大师`))) family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${family.name}家史记载：${current.name}为${name}大师。`, type: 'family' })
+    }
     if (current.boundArtifact && !family.inheritedArtifacts?.some((entry) => entry.ownerId === current.id && entry.artifactId === current.boundArtifact!.artifactId)) {
       const definition = itemById(current.boundArtifact.artifactId)
       family.inheritedArtifacts ??= []
@@ -1192,7 +1212,7 @@ export const useGameStore = defineStore('game', () => {
       bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
       eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
       combatPower: 0, combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [], battleStats: initialBattleStats(),
-      equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill', 'make-healing-pill', 'forge-green-edge'], secretRealmStates: initialSecretRealmStates(), secretRealmHistory: [], itemSourceHistory: family?.inheritedArtifacts?.flatMap((entry) => entry.sourceHistory.map((source) => ({ ...source }))) ?? [],
+      equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill', 'make-healing-pill', 'forge-green-edge'], secretRealmStates: initialSecretRealmStates(), secretRealmHistory: [], itemSourceHistory: family?.inheritedArtifacts?.flatMap((entry) => entry.sourceHistory.map((source) => ({ ...source }))) ?? [], professionProgress: initialProfessionProgress(), tradeHistory: [], auctionHistory: [],
     }
     state.player.lifespanMonths = calculateMaxLifespanMonths(state.player)
     if (family) { family.wealth = Math.ceil(family.wealth * .5); family.resources = Math.ceil(family.resources * .5); family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${descendant.name}继承家族血脉与部分资产。`, type: 'family' }); transferInventory(family.inventory, state.player.inventory) }
@@ -1292,6 +1312,95 @@ export const useGameStore = defineStore('game', () => {
     if (!current || !craftItem(current, recipeId)) return false
     timeline(`完成「${RECIPES.find((entry) => entry.id === recipeId)?.name ?? '炼制'}」。`, 'loot')
     scheduleSave(); return true
+  }
+
+  function refreshMarketNow() {
+    if (!state.player) return false
+    const changed = refreshMarket(state.market, state.world, createSeededRandom(`${state.world.seed}:market:${state.world.currentYear}:${state.market.cycle}`), state.player, state.market.listings.length === 0)
+    if (changed) scheduleSave()
+    return changed
+  }
+
+  function buyMarketItem(listingId: string, quantity = 1) {
+    if (!state.player) return { ok: false, reason: '尚未入世', total: 0 }
+    const result = executeMarketBuy(state.player, state.market, state.world, listingId, quantity)
+    if (result.ok) {
+      timeline(`在坊市购入物品，共耗费 ${result.total} 灵石。`, 'loot')
+      if (state.player.tradeHistory.reduce((sum, trade) => sum + trade.totalPrice, 0) >= 100000 && !state.player.achievements.includes('百业巨商')) { state.player.achievements.push('百业巨商'); recordLifeMoment('累计经手交易超过十万灵石，商名传遍坊市。', 'inheritance', 4) }
+      scheduleSave()
+    }
+    return result
+  }
+
+  function sellMarketItem(listingId: string, quantity = 1) {
+    if (!state.player) return { ok: false, reason: '尚未入世', total: 0 }
+    const result = executeMarketSell(state.player, state.market, state.world, listingId, quantity)
+    if (result.ok) {
+      timeline(`在坊市售出物品，收入 ${result.total} 灵石。`, 'loot')
+      if (state.player.tradeHistory.reduce((sum, trade) => sum + trade.totalPrice, 0) >= 100000 && !state.player.achievements.includes('百业巨商')) { state.player.achievements.push('百业巨商'); recordLifeMoment('累计经手交易超过十万灵石，商名传遍坊市。', 'inheritance', 4) }
+      scheduleSave()
+    }
+    return result
+  }
+
+  function craftProfession(recipeId: string) {
+    const current = state.player; const recipe = RECIPES.find((entry) => entry.id === recipeId)
+    if (!current || !recipe) return undefined
+    const progress = current.professionProgress.find((entry) => entry.id === recipe.profession)
+    const successesBefore = progress?.successes ?? 0
+    const levelBefore = progress?.level ?? 0
+    const rng = createSeededRandom(`${state.world.seed}:craft:${current.id}:${recipeId}:${progress?.totalActions ?? 0}`)
+    const result = resolveCraft(current, recipeId, rng, currentSect.value?.type)
+    timeline(`${recipe.name}：${result.message}`, result.success ? 'loot' : 'life')
+    if (result.success && successesBefore === 0) recordLifeMoment(`第一次成功${recipe.profession === 'ALCHEMY' ? '炼丹' : '炼器'}：${recipe.name}。`, 'inheritance', 3)
+    if (result.success && levelBefore < 80 && (progress?.level ?? 0) >= 80) {
+      const title = recipe.profession === 'ALCHEMY' ? '丹道大师' : '器道大师'
+      if (!current.achievements.includes(title)) current.achievements.push(title)
+      recordLifeMoment(`${current.name}${recipe.profession === 'ALCHEMY' ? '丹道' : '器道'}大成，世人尊为大师。`, 'inheritance', 4)
+    }
+    scheduleSave(); return result
+  }
+
+  function professionCraftChance(recipeId: string) {
+    const recipe = RECIPES.find((entry) => entry.id === recipeId)
+    return state.player && recipe ? craftingChance(state.player, recipe, currentSect.value?.type) : 0
+  }
+
+  function craftAlchemy(recipeId: string) {
+    return RECIPES.find((entry) => entry.id === recipeId)?.profession === 'ALCHEMY' ? craftProfession(recipeId) : undefined
+  }
+
+  function craftRefining(recipeId: string) {
+    return RECIPES.find((entry) => entry.id === recipeId)?.profession === 'REFINING' ? craftProfession(recipeId) : undefined
+  }
+
+  function openAuction() {
+    if (state.auction.status === 'OPEN') return true
+    if (state.world.currentYear < state.auction.nextAuctionYear) return false
+    state.auction = createAuction(state.world, createSeededRandom(`${state.world.seed}:auction:${state.world.currentYear}`), state.auction); scheduleSave(); return true
+  }
+
+  function placeAuctionBid(lotId: string, amount: number) {
+    const lot = state.auction.lots.find((entry) => entry.id === lotId)
+    if (!state.player || !lot) return { ok: false, reason: '拍卖品不存在' }
+    const result = executeAuctionBid(state.player, lot, amount); if (result.ok) scheduleSave(); return result
+  }
+
+  function advanceAuction(lotId: string) {
+    const lot = state.auction.lots.find((entry) => entry.id === lotId)
+    if (!state.player || !lot) return false
+    const result = advanceAuctionRound(state.player, lot)
+    if (state.auction.lots.every((entry) => entry.remainingRounds <= 0 || entry.status !== 'OPEN')) {
+      settleAuction(state.player, state.auction)
+      const notable = state.player.auctionHistory.find((entry) => entry.year === state.auction.year && (entry.winnerId === state.player!.id || entry.sellerId === state.player!.id) && ['极品', '奇珍', '传说'].includes(itemById(entry.itemId)?.quality ?? ''))
+      if (notable && !state.player.achievements.includes('一槌名动')) { state.player.achievements.push('一槌名动'); recordLifeMoment(`在大型拍卖中成交${itemById(notable.itemId)?.name ?? '极品奇珍'}，一槌名动。`, 'inheritance', 4) }
+    }
+    scheduleSave(); return result
+  }
+
+  function consignAuctionItem(itemId: string, quantity: number, startingPrice: number) {
+    if (!state.player) return { ok: false, reason: '尚未入世' }
+    const result = executeConsignment(state.player, state.auction, state.world, createSeededRandom(`${state.world.seed}:consign:${state.auction.id}:${state.auction.lots.length}:${itemId}`), itemId, quantity, startingPrice); if (result.ok) scheduleSave(); return result
   }
 
   function equipArtifactFromItem(itemId: string) {
@@ -1520,12 +1629,12 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, pendingCombat, combatPower, combatAssessment, currentSect, currentSectOfferings, sectPeers, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration, activeSecretRealm, availableSecretRealms,
+    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, pendingCombat, combatPower, combatAssessment, currentSect, currentSectOfferings, sectPeers, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration, activeSecretRealm, availableSecretRealms, knownProfessionRecipes,
     initialize, createCharacter, cultivate, adventure, advanceYear, breakthrough, chooseEvent, chooseLifeEvent, closeEventResult, triggerRandomEvent, triggerLifeEvent, lifeEventPool, continueAsDescendant,
     enterReincarnationHall, beginReincarnationCreation, purchaseFate, canPurchaseFate: (purchase: FatePurchase) => canPurchaseFate(state.reincarnation, purchase),
     modifyStat, selectPrimaryPath, selectSecondaryPath, pathPractice, bloodRite, becomeGhost, finalizeMortalDeath, regenerateWorld, debugWorld, useItem,
     learnTechnique, selectTechnique, improveAcquiredRoot, joinPlayerSect, donateSectResources, exchangeSectTechnique, exchangeSectOffering, chooseMaster, changePlayerRelationship, establishCultivationFamily, equipArtifactFromItem, equipInventoryItem, unequipInventoryItem, bindArtifactItem, unbindArtifactItem, nourishArtifact, prepareBattleCardFromItem, craftRecipe,
-    enterSecretRealm, exploreSecretRealm, continueSecretRealm, leaveSecretRealm, failSecretRealm,
+    enterSecretRealm, exploreSecretRealm, continueSecretRealm, leaveSecretRealm, failSecretRealm, refreshMarketNow, buyMarketItem, sellMarketItem, craftProfession, craftAlchemy, craftRefining, professionCraftChance, openAuction, placeAuctionBid, advanceAuction, consignAuctionItem,
     startCombat, startNPCCombat, resolvePendingCombat, refreshCombatPower, battleCardCatalog: BATTLE_CARD_CATALOG, artifactCatalog: ARTIFACT_CATALOG, techniqueCatalog: TECHNIQUES, actionCatalog: CULTIVATION_ACTIONS, manualSave, resetGame, replaceState, debug,
   }
 })

@@ -9,6 +9,7 @@ export const router = createRouter({
     { path: '/secret-realms', component: () => import('../views/SecretRealmView.vue'), meta: { label: '秘境' } },
     { path: '/combat', component: () => import('../views/CombatView.vue'), meta: { label: '战斗' } },
     { path: '/inventory', component: () => import('../views/InventoryView.vue'), meta: { label: '背包' } },
+    { path: '/market', component: () => import('../views/MarketView.vue'), meta: { label: '坊市' } },
     { path: '/world', component: () => import('../views/WorldView.vue'), meta: { label: '世界' } },
     { path: '/sect', component: () => import('../views/SectView.vue'), meta: { label: '宗门' } },
     { path: '/relations', component: () => import('../views/RelationsView.vue'), meta: { label: '人际' } },

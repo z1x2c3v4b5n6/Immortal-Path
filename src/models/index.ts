@@ -203,7 +203,23 @@ export interface ItemSourceRecord { itemId: string; year: number; location: stri
 export interface ArtifactLegacyRecord { artifactId: string; artifactName: string; ownerName: string; ownerId: string; nourishment: number; affinity: number; sourceHistory: ItemSourceRecord[]; formerOwners: string[]; totalNourishment: number; legacyLevel: number }
 export interface RecipeMaterial { itemId: string; amount: number }
 export interface RecipeRequirement { type: 'REALM' | 'PATH' | 'SECT'; value: string | number }
-export interface Recipe { id: string; name: string; resultItemId: string; resultAmount: number; materials: RecipeMaterial[]; requirements?: RecipeRequirement[] }
+export type ProfessionId = 'ALCHEMY' | 'REFINING' | 'COMMERCE'
+export interface ProfessionProgress { id: ProfessionId; experience: number; level: number; totalActions: number; successes: number; mastery: number }
+export interface Recipe { id: string; name: string; resultItemId: string; resultAmount: number; materials: RecipeMaterial[]; requirements?: RecipeRequirement[]; profession: Exclude<ProfessionId, 'COMMERCE'>; difficulty: number; experience: number; minimumProfessionLevel?: number; recipeType?: string }
+export interface CraftingResult { success: boolean; resultItemId: string; resultAmount: number; qualityText: string; experienceGain: number; materialsConsumed: RecipeMaterial[]; message: string; byproductItemId?: string }
+
+export type MerchantType = '杂货商' | '灵药商' | '丹药商' | '材料商' | '法器商' | '游商' | '黑市商人'
+export interface PriceReason { label: string; modifier: number }
+export interface MarketListing { listingId: string; itemId: string; quantity: number; buyPrice: number; sellPrice: number; merchantType: MerchantType; refreshYear: number; trend: number; reasons: PriceReason[] }
+export interface SupplyDemandState { itemId: string; supply: number; demand: number; trend: number; lastUpdatedYear: number }
+export interface MarketRumor { id: string; text: string; tags: string[]; modifier: number; expiresYear: number }
+export interface MarketState { cycle: number; lastRefreshYear: number; listings: MarketListing[]; supplyDemand: SupplyDemandState[]; rumors: MarketRumor[] }
+export interface TradeRecord { id: string; year: number; itemId: string; quantity: number; type: 'BUY' | 'SELL'; unitPrice: number; totalPrice: number; merchantType: MerchantType }
+export interface EconomyState { marketIndex: number; aggregateDemand: Record<string, number>; lastSimulatedYear: number }
+export interface AuctionBid { bidderId: string; bidderName: string; amount: number; maxBid: number; interest: number; round: number }
+export interface AuctionLot { id: string; itemId: string; quantity: number; startingPrice: number; currentPrice: number; sellerType: 'WORLD' | 'NPC' | 'PLAYER'; sellerId?: string; bids: AuctionBid[]; winnerId?: string; status: 'OPEN' | 'SOLD' | 'UNSOLD'; remainingRounds: number; reservedPlayerBid: number }
+export interface AuctionRecord { id: string; year: number; itemId: string; quantity: number; price: number; winnerId?: string; sellerId?: string; status: 'SOLD' | 'UNSOLD'; fee: number }
+export interface AuctionState { id: string; year: number; status: 'CLOSED' | 'OPEN' | 'SETTLED'; lots: AuctionLot[]; history: AuctionRecord[]; nextAuctionYear: number }
 
 export type SecretRealmRunStatus = 'ACTIVE' | 'ESCAPED' | 'CLEARED' | 'FAILED'
 export type SecretRealmEncounterType = 'RESOURCE' | 'COMBAT' | 'EVENT' | 'TREASURE' | 'HAZARD'
@@ -299,6 +315,9 @@ export interface Player {
   secretRealmStates: SecretRealmState[]
   secretRealmHistory: SecretRealmHistoryRecord[]
   itemSourceHistory: ItemSourceRecord[]
+  professionProgress: ProfessionProgress[]
+  tradeHistory: TradeRecord[]
+  auctionHistory: AuctionRecord[]
 }
 
 export interface Descendant {
@@ -424,6 +443,7 @@ export interface NPCCultivator {
   knownTechniques: string[]
   combatPower: number
   battleStats: BattleStats
+  profession?: ProfessionProgress
 }
 export interface Relationship { id: string; fromId: string; toId: string; type: RelationshipType; value: number; createdYear: number; note: string }
 export interface SectRelation { id: string; fromSectId: string; toSectId: string; type: SectRelationType; value: number; updatedYear: number }
@@ -563,4 +583,7 @@ export interface GameSave {
   currentAction: CurrentAction | null
   pendingCombat: PendingCombat | null
   secretRealmRun: SecretRealmRun | null
+  economy: EconomyState
+  market: MarketState
+  auction: AuctionState
 }

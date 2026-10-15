@@ -1,6 +1,6 @@
 import { REALMS } from '../../data/realms'
 import { randomSpiritRoot } from '../creation/creation'
-import type { CultivationPathId, NPCCultivator, Sect } from '../../models'
+import type { CultivationPathId, NPCCultivator, ProfessionId, Sect } from '../../models'
 import type { RandomService } from '../random/RandomService'
 import { SECT_TYPE_PATH, sectPositionForRealm } from '../sect/sect'
 import { calculateNPCCombatPower } from '../combat/combatPower'
@@ -21,6 +21,11 @@ export function generateNPCCultivator(rng: RandomService, currentYear: number, s
     spiritRoot: randomSpiritRoot(rng, sect?.rank ? sect.rank * 2 : 0), path, talents: rng.chance(.22) ? [rng.pick(['早慧', '勤修', '剑骨', '福缘'])] : [],
     personality: rng.pick(personalities), sectId: sect?.id, position: sect ? sectPositionForRealm(realm, rng.randomInt(0, 700)) : undefined,
     alive: true, generation, knownTechniques: sect?.techniqueIds.slice(0, Math.max(1, Math.min(3, sect.rank))) ?? ['plain-breath'], combatPower: 0, battleStats: initialBattleStats(),
+  }
+  if (rng.chance(.28)) {
+    const profession: ProfessionId = sect?.type === '丹宗' ? 'ALCHEMY' : sect?.type === '器宗' ? 'REFINING' : rng.pick(['ALCHEMY', 'REFINING', 'COMMERCE'] as ProfessionId[])
+    const level = Math.min(100, rng.randomInt(8, 28) + realm * 2 + (sect?.type === '丹宗' || sect?.type === '器宗' ? 12 : 0))
+    npc.profession = { id: profession, level, experience: level ** 2, totalActions: level * 3, successes: level * 2, mastery: level / 100 }
   }
   npc.combatPower = calculateNPCCombatPower(npc)
   return npc

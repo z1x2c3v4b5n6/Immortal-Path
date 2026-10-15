@@ -17,8 +17,12 @@ import { initialBattleStats } from '../combat/combat'
 import { calculateCombatPower, calculateNPCCombatPower } from '../combat/combatPower'
 import { emptyEquipment } from '../items/equipment'
 import { initialSecretRealmStates } from '../secretRealm/secretRealm'
+import { initialProfessionProgress } from '../professions/professions'
+import { initialEconomyState } from '../economy/economySimulation'
+import { initialMarketState } from '../economy/market'
+import { initialAuctionState } from '../economy/auction'
 
-export const CURRENT_SAVE_VERSION = 13
+export const CURRENT_SAVE_VERSION = 14
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
 
@@ -130,11 +134,19 @@ function migrateFamilies(value: unknown): FamilyState[] {
   })
 }
 
-function migrateNPCCultivators(value: unknown): NPCCultivator[] {
+function migrateNPCCultivators(value: unknown, sourceVersion: number): NPCCultivator[] {
   if (!Array.isArray(value)) return []
   return value.map((entry, index) => {
     const old = record(entry); const realmIndex = typeof old.realmIndex === 'number' ? old.realmIndex : 0
+    const oldProfession = record(old.profession)
+    const professionId = ['ALCHEMY', 'REFINING', 'COMMERCE'].includes(String(oldProfession.id)) ? oldProfession.id as NonNullable<NPCCultivator['profession']>['id'] : undefined
+    const migratedProfession = professionId
+      ? { id: professionId, experience: typeof oldProfession.experience === 'number' ? oldProfession.experience : 0, level: typeof oldProfession.level === 'number' ? oldProfession.level : 0, totalActions: typeof oldProfession.totalActions === 'number' ? oldProfession.totalActions : 0, successes: typeof oldProfession.successes === 'number' ? oldProfession.successes : 0, mastery: typeof oldProfession.mastery === 'number' ? oldProfession.mastery : 0 }
+      : sourceVersion < 14 && index % 4 === 0
+        ? { id: (['ALCHEMY', 'REFINING', 'COMMERCE'] as const)[index % 3], experience: (10 + realmIndex * 2) ** 2, level: Math.min(100, 10 + realmIndex * 2), totalActions: 30 + realmIndex * 4, successes: 20 + realmIndex * 3, mastery: Math.min(100, 10 + realmIndex * 2) }
+        : undefined
     const npc: NPCCultivator = { ...(old as unknown as NPCCultivator), id: typeof old.id === 'string' ? old.id : `legacy-npc-${index}`, name: typeof old.name === 'string' ? old.name : `旧世修士${index + 1}`, ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 20 * 12, lifespanMonths: typeof old.lifespanMonths === 'number' ? old.lifespanMonths : 100 * 12, realmIndex, cultivation: typeof old.cultivation === 'number' ? old.cultivation : 0, spiritRoot: migrateRoot(old.spiritRoot), path: ['dao', 'sword', 'body', 'demonic', 'ghost'].includes(String(old.path)) ? old.path as CultivationPathId : 'dao', talents: Array.isArray(old.talents) ? old.talents.filter((item): item is string => typeof item === 'string') : [], personality: typeof old.personality === 'string' ? old.personality : '沉稳', alive: old.alive !== false, generation: typeof old.generation === 'number' ? old.generation : 1, knownTechniques: Array.isArray(old.knownTechniques) ? old.knownTechniques.filter((item): item is string => typeof item === 'string') : ['plain-breath'], combatPower: typeof old.combatPower === 'number' ? old.combatPower : 0, battleStats: { ...initialBattleStats(), ...record(old.battleStats) } }
+    if (migratedProfession) npc.profession = migratedProfession
     npc.combatPower = calculateNPCCombatPower(npc)
     return npc
   })
@@ -190,6 +202,11 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
   const oldResources = record(old.pathResources)
   const resources = { ...initialPathResources(), ...Object.fromEntries(Object.entries(oldResources).filter(([, entry]) => typeof entry === 'number')) } as Player['pathResources']
   const spiritRoot = migrateRoot(old.spiritRoot)
+  const oldProfessions = Array.isArray(old.professionProgress) ? old.professionProgress : []
+  const professionProgress = initialProfessionProgress().map((fallback) => {
+    const existing = oldProfessions.find((entry) => record(entry).id === fallback.id)
+    return existing ? { ...fallback, ...record(existing), id: fallback.id } as Player['professionProgress'][number] : fallback
+  })
   const player: Player = {
     ...(old as unknown as Player), id, generation, origin, familyId, entryType, realmIndex,
     ageMonths: typeof old.ageMonths === 'number' ? old.ageMonths : 16 * 12,
@@ -252,6 +269,9 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
     secretRealmStates: Array.isArray(old.secretRealmStates) ? old.secretRealmStates.map((entry) => ({ ...record(entry), firstClearCompleted: typeof record(entry).firstClearCompleted === 'boolean' ? record(entry).firstClearCompleted : false, runsThisLife: typeof record(entry).runsThisLife === 'number' ? record(entry).runsThisLife : 0 })) as Player['secretRealmStates'] : initialSecretRealmStates(),
     secretRealmHistory: Array.isArray(old.secretRealmHistory) ? old.secretRealmHistory as Player['secretRealmHistory'] : [],
     itemSourceHistory: Array.isArray(old.itemSourceHistory) ? old.itemSourceHistory as Player['itemSourceHistory'] : [],
+    professionProgress,
+    tradeHistory: Array.isArray(old.tradeHistory) ? old.tradeHistory as Player['tradeHistory'] : [],
+    auctionHistory: Array.isArray(old.auctionHistory) ? old.auctionHistory as Player['auctionHistory'] : [],
   }
   if (!player.unlockedPaths.length) player.unlockedPaths = ['dao', 'sword', 'body']
   if (!player.characterStates.length) player.characterStates = [CharacterState.NORMAL]
@@ -303,6 +323,7 @@ export function migrateSave(value: unknown): GameSave {
   const old = record(value)
   if (!('world' in old)) throw new Error('这不是有效的《长生录》存档。')
   const oldWorld = record(old.world)
+  const sourceVersion = typeof old.version === 'number' ? old.version : 1
   const seed = typeof oldWorld.seed === 'string' && oldWorld.seed.trim() ? oldWorld.seed.trim().toUpperCase() : stableLegacySeed(oldWorld)
   const baseWorld = createWorld(seed)
   const sects = migrateSects(oldWorld.sects, baseWorld.sects)
@@ -316,7 +337,7 @@ export function migrateSave(value: unknown): GameSave {
     worldEvents: Array.isArray(oldWorld.worldEvents) ? oldWorld.worldEvents as WorldState['worldEvents'] : [],
     sects,
     npcs: Array.isArray(oldWorld.npcs) ? oldWorld.npcs as WorldState['npcs'] : [],
-    npcCultivators: migrateNPCCultivators(npcSource),
+    npcCultivators: migrateNPCCultivators(npcSource, sourceVersion),
     relationships: Array.isArray(oldWorld.relationships) ? oldWorld.relationships as WorldState['relationships'] : [],
     sectRelations: Array.isArray(oldWorld.sectRelations) ? oldWorld.sectRelations as WorldState['sectRelations'] : initialSectRelations(sects, migrationYear),
     territories: Array.isArray(oldWorld.territories) ? oldWorld.territories as WorldState['territories'] : generateTerritories(sects, migrationRandom),
@@ -327,7 +348,7 @@ export function migrateSave(value: unknown): GameSave {
   const now = new Date().toISOString()
   const save: GameSave = {
     id: 'main', version: CURRENT_SAVE_VERSION, createdAt: typeof old.createdAt === 'string' ? old.createdAt : now,
-    updatedAt: typeof old.updatedAt === 'string' ? old.updatedAt : now, player: migratePlayer(old.player, world, typeof old.version === 'number' ? old.version : 1), world,
+    updatedAt: typeof old.updatedAt === 'string' ? old.updatedAt : now, player: migratePlayer(old.player, world, sourceVersion), world,
     lifeRecords: migrateLifeRecords(old.lifeRecords), reincarnation: migrateReincarnation(old.reincarnation),
     settings: { fortunateMode: true, autoSave: true, logLimit: 120, ...(record(old.settings) as Partial<GameSave['settings']>) },
     pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0, ...(record(old.pity) as Partial<GameSave['pity']>) },
@@ -336,6 +357,9 @@ export function migrateSave(value: unknown): GameSave {
     currentAction: old.currentAction && typeof old.currentAction === 'object' && Object.values(CultivationAction).includes(record(old.currentAction).action as CultivationAction) ? old.currentAction as GameSave['currentAction'] : null,
     pendingCombat: old.pendingCombat && typeof old.pendingCombat === 'object' ? old.pendingCombat as GameSave['pendingCombat'] : null,
     secretRealmRun: old.secretRealmRun && typeof old.secretRealmRun === 'object' ? old.secretRealmRun as GameSave['secretRealmRun'] : null,
+    economy: old.economy && typeof old.economy === 'object' ? { ...initialEconomyState(world.currentYear), ...record(old.economy) } as GameSave['economy'] : initialEconomyState(world.currentYear),
+    market: old.market && typeof old.market === 'object' ? { ...initialMarketState(world.currentYear), ...record(old.market), listings: Array.isArray(record(old.market).listings) ? record(old.market).listings as GameSave['market']['listings'] : [], supplyDemand: Array.isArray(record(old.market).supplyDemand) ? record(old.market).supplyDemand as GameSave['market']['supplyDemand'] : initialMarketState(world.currentYear).supplyDemand, rumors: Array.isArray(record(old.market).rumors) ? record(old.market).rumors as GameSave['market']['rumors'] : [] } : initialMarketState(world.currentYear),
+    auction: old.auction && typeof old.auction === 'object' ? { ...initialAuctionState(world.currentYear), ...record(old.auction), lots: Array.isArray(record(old.auction).lots) ? record(old.auction).lots as GameSave['auction']['lots'] : [], history: Array.isArray(record(old.auction).history) ? record(old.auction).history as GameSave['auction']['history'] : [] } : initialAuctionState(world.currentYear),
   }
   if (save.pendingCombat && !save.pendingCombat.context) {
     const sourceType = save.pendingCombat.source === 'adventure' ? 'ADVENTURE' : save.pendingCombat.source === 'sect' ? 'SECT_EVENT' : save.pendingCombat.source === 'family' ? 'FAMILY_EVENT' : save.pendingCombat.source === 'secretRealm' ? 'SECRET_REALM' : save.pendingCombat.source === 'debug' ? 'DEBUG' : 'LIFE_EVENT'

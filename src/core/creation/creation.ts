@@ -11,6 +11,7 @@ import { initialCultivationResources } from '../actions/actionEffects'
 import { initialBattleStats } from '../combat/combat'
 import { emptyEquipment } from '../items/equipment'
 import { initialSecretRealmStates } from '../secretRealm/secretRealm'
+import { initialProfessionProgress } from '../professions/professions'
 
 export const STAT_KEYS: StatKey[] = ['comprehension', 'luck', 'constitution', 'soul', 'charm']
 export const STAT_LABELS: Record<StatKey, string> = { comprehension: '悟性', luck: '气运', constitution: '体魄', soul: '神识', charm: '魅力' }
@@ -152,7 +153,7 @@ export function createPlayerFromBuild(build: CharacterBuild, generation: number,
     bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
     eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
     combatPower: 0, combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [], battleStats: initialBattleStats(),
-    equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill', 'make-healing-pill', 'forge-green-edge'],
+      equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill', 'make-healing-pill', 'forge-green-edge'], professionProgress: initialProfessionProgress(), tradeHistory: [], auctionHistory: [],
     secretRealmStates: initialSecretRealmStates(), secretRealmHistory: [], itemSourceHistory: [],
   }
   player.lifespanMonths = calculateMaxLifespanMonths(player)

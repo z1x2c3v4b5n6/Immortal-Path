@@ -8,6 +8,7 @@ const nav = [
   { to: '/secret-realms', label: '秘境', glyph: '境' },
   { to: '/combat', label: '战斗', glyph: '战' },
   { to: '/inventory', label: '背包', glyph: '囊' },
+  { to: '/market', label: '坊市', glyph: '市' },
   { to: '/world', label: '世界', glyph: '界' },
   { to: '/sect', label: '宗门', glyph: '宗' },
   { to: '/relations', label: '人际', glyph: '缘' },
