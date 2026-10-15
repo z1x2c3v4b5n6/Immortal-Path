@@ -6,10 +6,14 @@ import { breakthroughStateModifier } from '../actions/actionEffects'
 import { getSpiritRootBreakthroughModifier } from '../spiritRoot/spiritRoot'
 import { calculateTechniqueAffinity } from '../techniques/techniques'
 import { getWorldModifier } from '../world/world'
+import { equipmentEffectTotal } from '../items/equipment'
+import { breakthroughPillFor, consumeInventoryItem, pillEffectMultiplier, recordPill } from '../items/pills'
+import { pillById } from '../../data/pills'
 
 export interface BreakthroughOptions {
   useAuxiliaries?: boolean
   useDemonicSacrifice?: boolean
+  pillId?: string
 }
 
 export interface BreakthroughAid {
@@ -19,6 +23,7 @@ export interface BreakthroughAid {
   lifespanMonths: number
   demonicNature: number
   descriptions: string[]
+  pillBonus: number
 }
 
 export interface BreakthroughChance {
@@ -34,6 +39,7 @@ export interface BreakthroughChance {
   environment: number
   preparation: number
   auxiliary: number
+  equipment: number
   final: number
   aid: BreakthroughAid
 }
@@ -66,12 +72,13 @@ export function breakthroughResourceCost(player: Player): CultivationResources {
 }
 
 export function calculateBreakthroughAid(player: Player, options: BreakthroughOptions = {}): BreakthroughAid {
-  const aid: BreakthroughAid = { bonus: 0, itemIds: [], resources: emptyResources(), lifespanMonths: 0, demonicNature: 0, descriptions: [] }
-  if (options.useAuxiliaries) {
+  const aid: BreakthroughAid = { bonus: 0, itemIds: [], resources: emptyResources(), lifespanMonths: 0, demonicNature: 0, descriptions: [], pillBonus: 0 }
+  if (options.useAuxiliaries || options.pillId) {
     const target = REALMS[player.realmIndex + 1]
-    const foundationPill = target?.group === '筑基' ? player.inventory.find((entry) => entry.itemId === 'foundation-pill' && entry.quantity > 0) : undefined
-    if (foundationPill) { aid.itemIds.push('foundation-pill'); aid.bonus += .2; aid.descriptions.push('筑基丹 +20%') }
-    const preferred = breakthroughResourceCost(player)
+    const selectedPill = target ? breakthroughPillFor(player, target.group, options.pillId) : undefined
+    const pillEffect = selectedPill?.effects.find((effect) => effect.type === 'BREAKTHROUGH' && effect.target === target?.group)
+    if (selectedPill && pillEffect) { aid.itemIds.push(selectedPill.id); aid.pillBonus = pillEffect.value * pillEffectMultiplier(player.pillToxicity); aid.bonus += aid.pillBonus; aid.descriptions.push(`${selectedPill.name} +${Math.round(aid.pillBonus * 100)}%`) }
+    const preferred = options.useAuxiliaries ? breakthroughResourceCost(player) : emptyResources()
     aid.resources.spiritHerbs = Math.min(player.resources.spiritHerbs, preferred.spiritHerbs)
     aid.resources.beastCores = Math.min(player.resources.beastCores, preferred.beastCores)
     aid.resources.bodyMaterials = Math.min(player.resources.bodyMaterials, preferred.bodyMaterials)
@@ -97,12 +104,12 @@ export function calculateBreakthroughAid(player: Player, options: BreakthroughOp
   return aid
 }
 
-export function consumeBreakthroughAid(player: Player, aid: BreakthroughAid) {
+export function consumeBreakthroughAid(player: Player, aid: BreakthroughAid, year = 0) {
   for (const itemId of aid.itemIds) {
-    const stack = player.inventory.find((entry) => entry.itemId === itemId)
-    if (stack) stack.quantity--
+    consumeInventoryItem(player, itemId)
+    const pill = pillById(itemId)
+    if (pill) recordPill(player, pill, year, aid.pillBonus)
   }
-  player.inventory = player.inventory.filter((entry) => entry.quantity > 0)
   for (const key of Object.keys(aid.resources) as (keyof CultivationResources)[]) player.resources[key] = Math.max(0, player.resources[key] - aid.resources[key])
   player.lifespanBonusMonths -= aid.lifespanMonths
   player.pathResources.demonicNature = Math.max(0, player.pathResources.demonicNature - aid.demonicNature)
@@ -160,9 +167,10 @@ export function calculateBreakthroughChance(player: Player, world?: WorldState, 
   const preparation = Math.min(.1, Math.max(0, player.breakthroughProgress) * .001)
   const aid = calculateBreakthroughAid(player, options)
   const auxiliary = aid.bonus
-  const total = base + spiritRoot + comprehension + luck + talent + technique + path + environment + state + preparation + auxiliary
+  const equipment = equipmentEffectTotal(player, 'BREAKTHROUGH_CHANCE') + equipmentEffectTotal(player, 'BREAKTHROUGH_STABILITY')
+  const total = base + spiritRoot + comprehension + luck + talent + technique + path + environment + state + preparation + auxiliary + equipment
   const final = major ? Math.max(.05, Math.min(.95, total)) : Math.max(.9, Math.min(.99, total))
-  return { isMajor: major, base, spiritRoot, comprehension, luck, talent, technique, path, state, environment, preparation, auxiliary, final, aid }
+  return { isMajor: major, base, spiritRoot, comprehension, luck, talent, technique, path, state, environment, preparation, auxiliary, equipment, final, aid }
 }
 
 export function canBreakthrough(player: Player) {

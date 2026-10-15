@@ -4,6 +4,7 @@ import { bodyStageName, pathById, swordIntentName } from '../data/cultivationPat
 import { useGameStore } from '../stores/game'
 import { calculateFiveElementBalance } from '../core/aptitude/aptitude'
 import { techniqueById } from '../data/techniques'
+import { itemById } from '../data/items'
 const game = useGameStore()
 const progress = computed(() => Math.min(100, (game.player!.cultivation / game.player!.cultivationRequired) * 100))
 const stats = computed<Array<[string, number, number]>>(() => [
@@ -24,6 +25,7 @@ const relationshipSummary = computed(() => {
   }
 })
 const elementGrowth = computed(() => Object.entries(game.player!.spiritualAptitude.elementalGrowth))
+const equipmentName = (id?: string) => id ? itemById(id)?.name ?? id : '未装备'
 </script>
 
 <template>
@@ -48,6 +50,7 @@ const elementGrowth = computed(() => Object.entries(game.player!.spiritualAptitu
     <div class="drawer-detail-block"><small>五行成长</small><div class="element-growth-mini"><span v-for="element in elementGrowth" :key="element[0]"><b>{{ element[0] }}</b>{{ element[1] }}</span></div></div>
     <div class="drawer-detail-block"><small>命运线</small><div class="drawer-fate-list"><span v-for="fate in game.player!.fatePaths" :key="fate.id">{{ fate.name }} · {{ fate.status === 'completed' ? '已铸成' : `${fate.progress}%` }}</span><span v-if="!game.player!.fatePaths.length">此生命运尚未成形</span></div></div>
     <div class="drawer-detail-block"><small>社会关系</small><div class="drawer-social-summary"><span>好友 {{ relationshipSummary.friends }}</span><span>竞争 {{ relationshipSummary.rivals }}</span><span>仇敌 {{ relationshipSummary.enemies }}</span><span>后代 {{ relationshipSummary.descendants }}</span></div></div>
+    <div class="drawer-detail-block"><small>装备</small><div class="drawer-fate-list"><span>武器 · {{ equipmentName(game.player!.equipment.weapon) }}</span><span>防具 · {{ equipmentName(game.player!.equipment.armor) }}</span><span>饰品 · {{ equipmentName(game.player!.equipment.accessory) }}</span><span>法宝 · {{ game.player!.equipment.artifactSlots.map(equipmentName).join('、') || '未装备' }}</span><span>本命 · {{ equipmentName(game.player!.boundArtifact?.artifactId) }}<template v-if="game.player!.boundArtifact">（契合 {{ Math.round(game.player!.boundArtifact.affinity) }}% · 温养 {{ game.player!.boundArtifact.nourishment }}）</template></span></div></div>
     <div v-if="activeTechnique" class="root-card"><small>主修功法</small><b>《{{ activeTechnique.name }}》</b><p>{{ activeTechnique.grade }} · {{ activeTechnique.description }}</p></div>
     <div class="talent-tags"><span v-for="talent in game.player!.talents" :key="talent.id" :title="talent.description">{{ talent.name }}</span><span v-for="talent in game.player!.acquiredTalents" :key="talent.talentId" class="acquired">后天·{{ talent.name }}</span></div>
     <div class="bloodline-note"><small>{{ game.player!.bloodline.familyName }}</small><span>{{ game.player!.bloodline.inheritedTraits.join(' · ') || '凡俗血脉' }}</span></div>

@@ -1,6 +1,7 @@
 import { techniqueById } from '../../data/techniques'
 import { BodyRealm, CharacterState, type CombatPowerBreakdown, type NPCCultivator, type Player, type WorldState } from '../../models'
 import { calculateTechniqueAffinity } from '../techniques/techniques'
+import { equipmentCombatContribution } from '../items/equipment'
 
 const bodyRealmPower: Record<BodyRealm, number> = {
   [BodyRealm.SKIN]: 0,
@@ -46,7 +47,7 @@ export function calculateCombatPower(player: Player, world?: WorldState): Combat
   const stats = Math.round(player.stats.constitution * .55 + player.stats.soul * .42 + player.stats.comprehension * .28 + player.stats.luck * .12)
   const talents = player.talents.reduce((sum, talent) => sum + talent.cost * 7, 0) + player.acquiredTalents.length * 18
   const path = pathPower(player)
-  const artifacts = player.equippedArtifacts.reduce((sum, artifact) => sum + artifact.power + artifact.attack * .7 + artifact.defense * .55, 0)
+  const artifacts = player.equippedArtifacts.reduce((sum, artifact) => sum + artifact.power + artifact.attack * .7 + artifact.defense * .55, 0) + equipmentCombatContribution(player)
   let state = 0
   if (player.characterStates.includes(CharacterState.INJURED)) state -= Math.round(realm * .08)
   if (player.characterStates.includes(CharacterState.SERIOUS_INJURY)) state -= Math.round(realm * .24)

@@ -3,6 +3,7 @@ import type { RandomService } from '../random/RandomService'
 import { calculateCombatPower } from './combatPower'
 import { combatStrategyById } from './combatStrategy'
 import { isLegendaryBattle } from './combatResult'
+import { equipmentEffectTotal, equippedItems } from '../items/equipment'
 
 export interface CombatResolveOptions { battleCard?: BattleCard; forceOutcome?: CombatOutcome }
 
@@ -39,7 +40,7 @@ export function combatStrengthLabel(playerPower: number, enemyPower: number) {
 export function calculateEscapeChance(player: Player, enemy: CombatEnemy, card?: BattleCard) {
   const realmGap = player.realmIndex - enemy.realmIndex
   const statePenalty = player.characterStates.includes(CharacterState.SERIOUS_INJURY) ? -.22 : player.characterStates.includes(CharacterState.INJURED) ? -.08 : 0
-  return Math.max(.08, Math.min(.95, .5 + realmGap * .07 + player.stats.luck / 500 + player.stats.comprehension / 1000 + (player.spiritRoot.elements.includes('风') ? .12 : 0) + (card?.escapeBonus ?? 0) + statePenalty))
+  return Math.max(.08, Math.min(.95, .5 + realmGap * .07 + player.stats.luck / 500 + player.stats.comprehension / 1000 + (player.spiritRoot.elements.includes('风') ? .12 : 0) + (card?.escapeBonus ?? 0) + equipmentEffectTotal(player, 'ESCAPE_CHANCE') + statePenalty))
 }
 
 function pathProfile(player: Player) {
@@ -59,18 +60,22 @@ export function resolveCombat(player: Player, enemy: CombatEnemy, strategyId: Co
   const affinity = elementalCombatModifier(elements, enemy.elements)
   const environmentModifier = environmentCombatModifier(elements, player.primaryPath, environment)
   const luckSwing = (player.stats.luck - 50) / 800 + (rng.random() - .5) * .16
-  const power = breakdown.total * strategy.offense * path.offense * (1 + affinity + environmentModifier + (card?.powerMultiplier ?? 0) + luckSwing)
-  const defense = Math.max(1, breakdown.total * .11 * strategy.defense * path.defense * (1 + (card?.defenseMultiplier ?? 0)) + player.equippedArtifacts.reduce((sum, item) => sum + item.defense, 0))
+  const equipmentOffense = equipmentEffectTotal(player, 'STRATEGY_OFFENSE') + equipmentEffectTotal(player, 'ELEMENT_POWER') + (player.primaryPath === 'sword' ? equipmentEffectTotal(player, 'SWORD_INTENT') : 0)
+  const equipmentDefense = equipmentEffectTotal(player, 'STRATEGY_DEFENSE')
+  const power = breakdown.total * strategy.offense * path.offense * (1 + affinity + environmentModifier + (card?.powerMultiplier ?? 0) + equipmentOffense + luckSwing) + equipmentEffectTotal(player, 'ATTACK')
+  const defense = Math.max(1, breakdown.total * .11 * strategy.defense * path.defense * (1 + (card?.defenseMultiplier ?? 0) + equipmentDefense) + player.equippedArtifacts.reduce((sum, item) => sum + item.defense, 0) + equipmentEffectTotal(player, 'DEFENSE'))
   const enemyPower = enemy.combatPower * (.92 + rng.random() * .16)
   const rounds: CombatRound[] = []
-  let playerHealth = Math.max(100, Math.round(breakdown.total * .78 + player.stats.constitution * 3))
+  let playerHealth = Math.max(100, Math.round(breakdown.total * .78 + (player.stats.constitution + equipmentEffectTotal(player, 'CONSTITUTION')) * 3 + equipmentEffectTotal(player, 'COMBAT_HEALTH')))
   let enemyHealth = enemy.health
+  const playerHealthMax = playerHealth
+  const enemyHealthMax = enemyHealth
 
   if (strategyId === CombatStrategy.ESCAPE) {
     const escaped = options.forceOutcome ? options.forceOutcome === 'escape' : rng.chance(calculateEscapeChance(player, enemy, card))
     const outcome: CombatOutcome = escaped ? 'escape' : options.forceOutcome ?? (rng.chance(Math.max(.03, .16 + (enemy.combatPower - breakdown.total) / Math.max(100, enemy.combatPower) * .25)) ? 'death' : 'defeat')
     rounds.push({ round: 1, actor: 'player', text: escaped ? '你敛去气息，借地势遁出敌手感知。' : '遁光被对手截断，你被迫承受迎面一击。', damage: 0, playerHealth, enemyHealth })
-    const record = { id: crypto.randomUUID(), year: world.currentYear, month: world.currentMonth, enemyName: enemy.name, enemyType: enemy.type, enemyRealmIndex: enemy.realmIndex, playerRealmIndex: player.realmIndex, playerPower: breakdown.total, enemyPower: enemy.combatPower, strategy: strategyId, battleCardName: card?.name, environment, outcome, rounds, summary: escaped ? `避开${enemy.name}，全身而退。` : outcome === 'death' ? `遁逃失败，死于${enemy.name}之手。` : `未能遁走，受创后侥幸脱身。`, legendary: false } satisfies CombatRecord
+    const record = { id: crypto.randomUUID(), year: world.currentYear, month: world.currentMonth, enemyName: enemy.name, enemyType: enemy.type, enemyRealmIndex: enemy.realmIndex, playerRealmIndex: player.realmIndex, playerPower: breakdown.total, enemyPower: enemy.combatPower, strategy: strategyId, battleCardName: card?.name, environment, outcome, rounds, summary: escaped ? `避开${enemy.name}，全身而退。` : outcome === 'death' ? `遁逃失败，死于${enemy.name}之手。` : `未能遁走，受创后侥幸脱身。`, legendary: false, playerHealthMax, playerHealthRemaining: outcome === 'death' ? 0 : playerHealth, enemyHealthMax, enemyHealthRemaining: enemyHealth } satisfies CombatRecord
     return record
   }
 
@@ -78,7 +83,8 @@ export function resolveCombat(player: Player, enemy: CombatEnemy, strategyId: Co
   for (let round = 1; round <= maxRounds && playerHealth > 0 && enemyHealth > 0; round++) {
     const playerDamage = Math.max(5, Math.round(power * (.085 + rng.random() * .04) - enemy.defense * (.45 + rng.random() * .25)))
     enemyHealth = Math.max(0, enemyHealth - playerDamage)
-    rounds.push({ round, actor: 'player', text: round === 1 ? path.text : player.primaryPath === 'sword' ? '剑势层叠，再次逼近对手命门。' : player.primaryPath === 'body' ? '气血如炉，你挥拳震开护体灵光。' : player.primaryPath === 'demonic' ? '魔气化刃，攻势愈发凶狠。' : player.primaryPath === 'ghost' ? '魂影交错，阴寒术法无声侵袭。' : '灵力流转，术法接踵而至。', damage: playerDamage, playerHealth, enemyHealth })
+    const equipmentOpening = equippedItems(player).find((item) => item.weaponVisualTag)?.weaponVisualTag ?? equippedItems(player).find((item) => item.artifactVisualTag)?.artifactVisualTag
+    rounds.push({ round, actor: 'player', text: round === 1 ? equipmentOpening ?? path.text : player.primaryPath === 'sword' ? '剑势层叠，再次逼近对手命门。' : player.primaryPath === 'body' ? '气血如炉，你挥拳震开护体灵光。' : player.primaryPath === 'demonic' ? '魔气化刃，攻势愈发凶狠。' : player.primaryPath === 'ghost' ? '魂影交错，阴寒术法无声侵袭。' : '灵力流转，术法接踵而至。', damage: playerDamage, playerHealth, enemyHealth })
     if (enemyHealth <= 0) break
     const enemyDamage = Math.max(4, Math.round(enemyPower * (.08 + rng.random() * .045) - defense * (.36 + rng.random() * .22)))
     playerHealth = Math.max(0, playerHealth - enemyDamage)
@@ -87,12 +93,12 @@ export function resolveCombat(player: Player, enemy: CombatEnemy, strategyId: Co
 
   let outcome: CombatOutcome = enemyHealth <= 0 ? 'victory' : playerHealth <= 0 ? 'defeat' : playerHealth >= enemyHealth ? 'victory' : 'defeat'
   if (options.forceOutcome) outcome = options.forceOutcome
-  if (outcome === 'defeat') {
+  if (outcome === 'defeat' && !options.forceOutcome) {
     const gap = (enemy.combatPower - breakdown.total) / Math.max(100, enemy.combatPower)
-    const deathChance = Math.max(.01, Math.min(.7, .05 + gap * .35 + strategy.deathRisk - player.stats.luck / 1200 - strategy.survival - (card?.defenseMultiplier ?? 0) * .25))
+    const deathChance = Math.max(.01, Math.min(.7, .05 + gap * .35 + strategy.deathRisk - player.stats.luck / 1200 - strategy.survival - (card?.defenseMultiplier ?? 0) * .25 - equipmentEffectTotal(player, 'INJURY_REDUCTION') * .35))
     if (rng.chance(deathChance)) outcome = 'death'
   }
   const summary = outcome === 'victory' ? `击败${enemy.name}，斗法取胜。` : outcome === 'death' ? `力战不敌，死于${enemy.name}之手。` : `不敌${enemy.name}，重伤脱身。`
   const base = { id: crypto.randomUUID(), year: world.currentYear, month: world.currentMonth, enemyName: enemy.name, enemyType: enemy.type, enemyRealmIndex: enemy.realmIndex, playerRealmIndex: player.realmIndex, playerPower: breakdown.total, enemyPower: enemy.combatPower, strategy: strategyId, battleCardName: card?.name, environment, outcome, rounds, summary }
-  return { ...base, legendary: isLegendaryBattle(base) }
+  return { ...base, legendary: isLegendaryBattle(base), playerHealthMax, playerHealthRemaining: outcome === 'death' ? 0 : playerHealth, enemyHealthMax, enemyHealthRemaining: outcome === 'victory' ? 0 : enemyHealth }
 }

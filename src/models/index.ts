@@ -1,7 +1,8 @@
 export type StatKey = 'comprehension' | 'luck' | 'constitution' | 'soul' | 'charm'
 export type PlayerStats = Record<StatKey, number>
-export type ItemQuality = '凡品' | '良品' | '精品' | '稀有' | '极品' | '奇珍'
-export type ItemType = '丹药' | '材料' | '法器' | '特殊' | '传承'
+export type ItemQuality = '凡品' | '良品' | '精品' | '稀有' | '珍品' | '极品' | '奇珍' | '传说'
+export type ItemType = '丹药' | '材料' | '武器' | '防具' | '饰品' | '法器' | '特殊' | '传承'
+export enum ItemCategory { MATERIAL = 'MATERIAL', PILL = 'PILL', WEAPON = 'WEAPON', ARMOR = 'ARMOR', ARTIFACT = 'ARTIFACT', ACCESSORY = 'ACCESSORY', TECHNIQUE = 'TECHNIQUE', QUEST = 'QUEST', SPECIAL = 'SPECIAL' }
 export type EntryType = 'initial' | 'bloodline' | 'reincarnation'
 export type TalentQuality = '普通' | '优秀' | '稀有' | '极品' | '传说'
 export type OriginSecret = '普通弃婴' | '修士遗孤' | '魔修血脉' | '妖族血脉' | '大能转世' | '古族后裔'
@@ -96,14 +97,27 @@ export type CombatOutcome = 'victory' | 'defeat' | 'escape' | 'death'
 export type CombatEnemyType = 'beast' | 'cultivator' | 'rival' | 'sect' | 'family'
 export type BattleCardType = 'secret-art' | 'pill' | 'talisman' | 'artifact'
 export type ArtifactSlot = 'weapon' | 'armor' | 'special'
+export type EquipmentSlot = 'weapon' | 'armor' | 'accessory' | 'artifact'
 export interface BattleCard { id: string; name: string; type: BattleCardType; description: string; powerMultiplier: number; defenseMultiplier: number; escapeBonus: number; lifespanCost: number; charges: number }
 export interface EquippedArtifact { id: string; name: string; slot: ArtifactSlot; attack: number; defense: number; power: number; element?: SpiritElement; specialEffect?: string }
 export interface BattleStats { battles: number; wins: number; losses: number; escapes: number; kills: number; beastKills: number; upsetWins: number; winStreak: number; experience: number }
 export interface CombatPowerBreakdown { realm: number; technique: number; root: number; stats: number; talents: number; path: number; artifacts: number; state: number; experience: number; total: number }
 export interface CombatEnemy { id: string; name: string; type: CombatEnemyType; realmIndex: number; path: CultivationPathId; elements: SpiritElement[]; combatPower: number; attack: number; defense: number; health: number; description: string; recommendedRealmIndex: number; npcId?: string; rewardStones: number; rewardItemId?: string }
 export interface CombatRound { round: number; actor: 'player' | 'enemy'; text: string; damage: number; playerHealth: number; enemyHealth: number }
-export interface CombatRecord { id: string; year: number; month: number; enemyName: string; enemyType: CombatEnemyType; enemyRealmIndex: number; playerRealmIndex: number; playerPower: number; enemyPower: number; strategy: CombatStrategy; battleCardName?: string; environment: string; outcome: CombatOutcome; rounds: CombatRound[]; summary: string; legendary: boolean }
-export interface PendingCombat { enemy: CombatEnemy; environment: string; source: 'adventure' | 'event' | 'sect' | 'family' | 'debug'; sourceEventId?: string; victoryEffects?: LifeEventEffect[] }
+export type CombatSourceType = 'ADVENTURE' | 'LIFE_EVENT' | 'SECT_EVENT' | 'FAMILY_EVENT' | 'NPC_DUEL' | 'SECRET_REALM' | 'DEBUG'
+export type EnemyVisualType = 'wolf' | 'beast' | 'rogue' | 'cultivator' | 'demonic' | 'ghost'
+export interface CombatContext {
+  sourceType: CombatSourceType
+  sourceId?: string
+  returnState?: { label: string; resultText?: string }
+  eventChoiceId?: string
+  location: string
+  riskLevel: number
+  mode: 'overlay' | 'embedded'
+}
+export interface CombatLoot { id: string; name: string; quantity: number; type: 'stones' | 'item' | 'resource' | 'cultivation' | 'experience' }
+export interface CombatRecord { id: string; year: number; month: number; enemyName: string; enemyType: CombatEnemyType; enemyRealmIndex: number; playerRealmIndex: number; playerPower: number; enemyPower: number; strategy: CombatStrategy; battleCardName?: string; environment: string; outcome: CombatOutcome; rounds: CombatRound[]; summary: string; legendary: boolean; playerHealthMax?: number; playerHealthRemaining?: number; enemyHealthMax?: number; enemyHealthRemaining?: number; injury?: 'none' | 'injured' | 'serious' | 'near-death' | 'death'; loot?: CombatLoot[]; experienceGained?: number; context?: CombatContext }
+export interface PendingCombat { enemy: CombatEnemy; environment: string; source: 'adventure' | 'event' | 'sect' | 'family' | 'secretRealm' | 'debug'; sourceEventId?: string; victoryEffects?: LifeEventEffect[]; context?: CombatContext }
 export interface CultivationResources { spiritHerbs: number; beastCores: number; bodyMaterials: number; soulCrystals: number }
 export interface CurrentAction { action: CultivationAction; startedYear: number; durationYears: number }
 export type ActionResultType = 'ordinary' | 'technique-breakthrough' | 'insight' | 'bottleneck' | 'inner-demon' | 'resource' | 'danger' | 'recovery'
@@ -171,6 +185,32 @@ export interface BloodlineState {
 }
 
 export interface InventoryItem { itemId: string; quantity: number }
+
+export type ItemEffectType = 'ATTACK' | 'DEFENSE' | 'COMBAT_HEALTH' | 'CONSTITUTION' | 'SOUL' | 'SWORD_INTENT' | 'ELEMENT_POWER' | 'TECHNIQUE_AFFINITY' | 'BREAKTHROUGH_CHANCE' | 'BREAKTHROUGH_STABILITY' | 'ESCAPE_CHANCE' | 'INJURY_REDUCTION' | 'STRATEGY_OFFENSE' | 'STRATEGY_DEFENSE' | 'LIFESPAN_YEARS' | 'SOUL_STABILITY' | 'MEDITATION_EFFICIENCY' | 'RESTRICTION_RESISTANCE' | 'COMBAT_POWER'
+export interface ItemEffectCondition { paths?: CultivationPathId[]; elements?: SpiritElement[]; minRealmIndex?: number; strategy?: CombatStrategy }
+export interface ItemEffect { type: ItemEffectType; value: number; description: string; condition?: ItemEffectCondition }
+export interface EquipmentState { weapon?: string; armor?: string; accessory?: string; artifactSlots: string[] }
+export interface ArtifactActiveEffect { type: 'POWER_BURST' | 'SOUL_DISRUPTION' | 'ESCAPE' | 'PROTECTION' | 'BREAK_RESTRICTION'; value: number; description: string }
+export interface ArtifactDefinition { id: string; name: string; grade: ItemQuality; description: string; passiveEffects: ItemEffect[]; activeEffect?: ArtifactActiveEffect; preferredPaths?: CultivationPathId[]; preferredElements?: SpiritElement[]; weaponVisualTag?: string; artifactVisualTag?: string }
+export type PillEffectType = 'CULTIVATION' | 'BREAKTHROUGH' | 'HEAL' | 'PROTECT_HEART' | 'LIFESPAN' | 'ACQUIRED_ROOT' | 'FIVE_ELEMENT' | 'COMBAT_POWER' | 'DETOX'
+export interface PillEffect { type: PillEffectType; value: number; target?: string; description: string }
+export interface PillDefinition { id: string; name: string; grade: ItemQuality; description: string; effects: PillEffect[]; cooldown?: number; toxicity?: number }
+export interface ConsumedPillRecord { pillId: string; year: number; effectiveValue: number; toxicityAdded: number }
+export interface BoundArtifactState { artifactId: string; bondedAtYear: number; nourishment: number; affinity: number }
+export interface ItemSourceRecord { itemId: string; year: number; location: string; source: string; inheritedFrom?: string }
+export interface ArtifactLegacyRecord { artifactId: string; artifactName: string; ownerName: string; ownerId: string; nourishment: number; affinity: number; sourceHistory: ItemSourceRecord[] }
+export interface RecipeMaterial { itemId: string; amount: number }
+export interface RecipeRequirement { type: 'REALM' | 'PATH' | 'SECT'; value: string | number }
+export interface Recipe { id: string; name: string; resultItemId: string; resultAmount: number; materials: RecipeMaterial[]; requirements?: RecipeRequirement[] }
+
+export type SecretRealmRunStatus = 'ACTIVE' | 'ESCAPED' | 'CLEARED' | 'FAILED'
+export type SecretRealmEncounterType = 'RESOURCE' | 'COMBAT' | 'EVENT' | 'TREASURE' | 'HAZARD'
+export interface InventoryReward { itemId: string; quantity: number }
+export interface SecretRealmEncounter { id: string; name: string; description: string; type: SecretRealmEncounterType; risk: number; enemyType?: CombatEnemyType; enemyDifficulty?: number; rewards: InventoryReward[]; injuryChance?: number }
+export interface SecretRealmDefinition { id: string; name: string; description: string; recommendedRealm: string; recommendedRealmIndex: number; recommendedCombatPower?: number; maxDepth: number; environmentTags: string[]; preferredPaths: CultivationPathId[]; encounters: SecretRealmEncounter[] }
+export interface SecretRealmRun { secretRealmId: string; currentDepth: number; status: SecretRealmRunStatus; collectedRewards: InventoryReward[]; injuries: string[]; eventHistory: string[]; pendingEncounter?: SecretRealmEncounter; awaitingDecision: boolean }
+export interface SecretRealmState { secretRealmId: string; discovered: boolean; accessUntilYear?: number; source: string }
+export interface SecretRealmHistoryRecord { secretRealmId: string; year: number; deepestDepth: number; status: SecretRealmRunStatus; rewards: InventoryReward[] }
 
 export interface Player {
   id: string
@@ -248,6 +288,14 @@ export interface Player {
   equippedArtifacts: EquippedArtifact[]
   battleCards: BattleCard[]
   battleStats: BattleStats
+  equipment: EquipmentState
+  boundArtifact: BoundArtifactState | null
+  pillToxicity: number
+  consumedPillHistory: ConsumedPillRecord[]
+  knownRecipes: string[]
+  secretRealmStates: SecretRealmState[]
+  secretRealmHistory: SecretRealmHistoryRecord[]
+  itemSourceHistory: ItemSourceRecord[]
 }
 
 export interface Descendant {
@@ -288,6 +336,7 @@ export interface FamilyState {
   fame: number
   territory: string
   history: SocialHistoryEntry[]
+  inheritedArtifacts?: ArtifactLegacyRecord[]
 }
 
 export interface SectMembership { sectId: string; position: SectPosition; contribution: number; joinedYear: number }
@@ -321,6 +370,17 @@ export interface ItemDefinition {
   requiredRealmIndex?: number
   description: string
   effects?: { type: 'cultivation' | 'lifespan' | 'stone'; value: number }[]
+  category?: ItemCategory
+  equipmentSlot?: EquipmentSlot
+  itemEffects?: ItemEffect[]
+  preferredPaths?: CultivationPathId[]
+  preferredElements?: SpiritElement[]
+  combatPower?: number
+  artifact?: ArtifactDefinition
+  pill?: PillDefinition
+  materialKind?: '灵药' | '妖兽材料' | '矿石' | '魂材' | '五行材料' | '特殊材料'
+  weaponVisualTag?: string
+  artifactVisualTag?: string
 }
 
 export interface TimelineEvent { year: number; month: number; text: string; type: 'life' | 'realm' | 'event' | 'loot' | 'death' }
@@ -499,4 +559,5 @@ export interface GameSave {
   pendingLifeEvent: PendingLifeEvent | null
   currentAction: CurrentAction | null
   pendingCombat: PendingCombat | null
+  secretRealmRun: SecretRealmRun | null
 }
