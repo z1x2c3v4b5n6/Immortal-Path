@@ -2,6 +2,7 @@ import { BASE_LIFESPAN_YEARS } from '../../data/lifespan'
 import { pathById } from '../../data/cultivationPaths'
 import { REALMS } from '../../data/realms'
 import type { Player } from '../../models'
+import { equipmentEffectTotal } from '../items/equipment'
 
 export type AgingStage = '壮年' | '暮年' | '寿元无多' | '大限将至' | '魂体'
 
@@ -18,7 +19,7 @@ export function calculateMaxLifespanMonths(player: Player, realmIndex = player.r
   const bodyGrowth = player.primaryPath === 'body' ? Math.min(.1, Math.max(0, (primaryProgress?.level ?? 1) - 1) * .008) : 0
   const bloodline = Math.min(.05, Math.max(0, player.bloodline.bloodlineLevel - 1) * .01)
   const multiplier = Math.max(.72, Math.min(1.55, pathBase + bodyGrowth + constitutionLifespanModifier(player.stats.constitution) + talentMultiplier + bloodline + player.lifespanFateModifier))
-  return Math.max(player.ageMonths + 1, Math.round((baseMonths + player.lifespanBonusMonths) * multiplier))
+  return Math.max(player.ageMonths + 1, Math.round((baseMonths + player.lifespanBonusMonths + equipmentEffectTotal(player, 'LIFESPAN_YEARS') * 12) * multiplier))
 }
 
 export function agingStage(player: Player): AgingStage {

@@ -15,8 +15,10 @@ import { generateTerritories } from '../world/territories'
 import { createSeededRandom } from '../random/RandomService'
 import { initialBattleStats } from '../combat/combat'
 import { calculateCombatPower, calculateNPCCombatPower } from '../combat/combatPower'
+import { emptyEquipment } from '../items/equipment'
+import { initialSecretRealmStates } from '../secretRealm/secretRealm'
 
-export const CURRENT_SAVE_VERSION = 12
+export const CURRENT_SAVE_VERSION = 13
 type UnknownRecord = Record<string, unknown>
 const record = (value: unknown): UnknownRecord => value && typeof value === 'object' ? value as UnknownRecord : {}
 
@@ -124,7 +126,7 @@ function migrateFamilies(value: unknown): FamilyState[] {
   if (!Array.isArray(value)) return []
   return value.map((entry) => {
     const old = record(entry)
-    return { ...(old as unknown as FamilyState), kind: old.kind === '修仙家族' || old.kind === '玩家家族' ? old.kind : '凡人家族', resources: typeof old.resources === 'number' ? old.resources : typeof old.wealth === 'number' ? Math.floor(old.wealth / 2) : 0, fame: typeof old.fame === 'number' ? old.fame : typeof old.reputation === 'number' ? old.reputation : 0, territory: typeof old.territory === 'string' ? old.territory : '故乡村镇', history: Array.isArray(old.history) ? old.history as FamilyState['history'] : [] }
+    return { ...(old as unknown as FamilyState), kind: old.kind === '修仙家族' || old.kind === '玩家家族' ? old.kind : '凡人家族', resources: typeof old.resources === 'number' ? old.resources : typeof old.wealth === 'number' ? Math.floor(old.wealth / 2) : 0, fame: typeof old.fame === 'number' ? old.fame : typeof old.reputation === 'number' ? old.reputation : 0, territory: typeof old.territory === 'string' ? old.territory : '故乡村镇', history: Array.isArray(old.history) ? old.history as FamilyState['history'] : [], inheritedArtifacts: Array.isArray(old.inheritedArtifacts) ? old.inheritedArtifacts as NonNullable<FamilyState['inheritedArtifacts']> : [] }
   })
 }
 
@@ -242,6 +244,14 @@ function migratePlayer(value: unknown, world: WorldState, sourceVersion: number)
     equippedArtifacts: Array.isArray(old.equippedArtifacts) ? old.equippedArtifacts as Player['equippedArtifacts'] : [],
     battleCards: Array.isArray(old.battleCards) ? old.battleCards as Player['battleCards'] : [],
     battleStats: { ...initialBattleStats(), ...record(old.battleStats) },
+    equipment: old.equipment && typeof old.equipment === 'object' ? { ...emptyEquipment(), ...record(old.equipment), artifactSlots: Array.isArray(record(old.equipment).artifactSlots) ? record(old.equipment).artifactSlots as string[] : [] } : emptyEquipment(),
+    boundArtifact: old.boundArtifact && typeof old.boundArtifact === 'object' ? old.boundArtifact as Player['boundArtifact'] : null,
+    pillToxicity: typeof old.pillToxicity === 'number' ? Math.max(0, Math.min(100, old.pillToxicity)) : 0,
+    consumedPillHistory: Array.isArray(old.consumedPillHistory) ? old.consumedPillHistory as Player['consumedPillHistory'] : [],
+    knownRecipes: Array.isArray(old.knownRecipes) ? old.knownRecipes.filter((entry): entry is string => typeof entry === 'string') : [],
+    secretRealmStates: Array.isArray(old.secretRealmStates) ? old.secretRealmStates as Player['secretRealmStates'] : initialSecretRealmStates(),
+    secretRealmHistory: Array.isArray(old.secretRealmHistory) ? old.secretRealmHistory as Player['secretRealmHistory'] : [],
+    itemSourceHistory: Array.isArray(old.itemSourceHistory) ? old.itemSourceHistory as Player['itemSourceHistory'] : [],
   }
   if (!player.unlockedPaths.length) player.unlockedPaths = ['dao', 'sword', 'body']
   if (!player.characterStates.length) player.characterStates = [CharacterState.NORMAL]
@@ -325,9 +335,14 @@ export function migrateSave(value: unknown): GameSave {
     pendingLifeEvent: old.pendingLifeEvent && typeof old.pendingLifeEvent === 'object' ? old.pendingLifeEvent as GameSave['pendingLifeEvent'] : null,
     currentAction: old.currentAction && typeof old.currentAction === 'object' && Object.values(CultivationAction).includes(record(old.currentAction).action as CultivationAction) ? old.currentAction as GameSave['currentAction'] : null,
     pendingCombat: old.pendingCombat && typeof old.pendingCombat === 'object' ? old.pendingCombat as GameSave['pendingCombat'] : null,
+    secretRealmRun: old.secretRealmRun && typeof old.secretRealmRun === 'object' ? old.secretRealmRun as GameSave['secretRealmRun'] : null,
+  }
+  if (save.pendingCombat && !save.pendingCombat.context) {
+    const sourceType = save.pendingCombat.source === 'adventure' ? 'ADVENTURE' : save.pendingCombat.source === 'sect' ? 'SECT_EVENT' : save.pendingCombat.source === 'family' ? 'FAMILY_EVENT' : save.pendingCombat.source === 'secretRealm' ? 'SECRET_REALM' : save.pendingCombat.source === 'debug' ? 'DEBUG' : 'LIFE_EVENT'
+    save.pendingCombat.context = { sourceType, sourceId: save.pendingCombat.sourceEventId ?? save.pendingCombat.environment, location: save.pendingCombat.environment, riskLevel: 2, mode: 'overlay', returnState: { label: save.pendingCombat.source === 'adventure' ? '继续历练' : save.pendingCombat.source === 'sect' ? '返回宗门' : save.pendingCombat.source === 'debug' ? '结束演武' : '继续事件' } }
   }
   if (save.player && !save.world.families.some((family) => family.id === save.player!.familyId)) {
-    save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [] })
+    save.world.families.push({ id: save.player.familyId, name: save.player.bloodline.familyName, founderId: save.player.id, foundedYear: save.player.birthYear, wealth: 0, inventory: [], reputation: 0, bloodline: save.player.bloodline, memberIds: [save.player.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [], inheritedArtifacts: [] })
   }
   return save
 }

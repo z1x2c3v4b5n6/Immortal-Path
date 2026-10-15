@@ -46,14 +46,23 @@ import { ARTIFACT_CATALOG, BATTLE_CARD_CATALOG, createCombatEnemy, initialBattle
 import { calculateCombatPower, calculateNPCCombatPower } from '../core/combat/combatPower'
 import { combatStrengthLabel, resolveCombat } from '../core/combat/combatResolver'
 import { unlockBattleAchievements } from '../core/combat/combatResult'
-import { CombatStrategy, type CombatEnemyType, type CombatOutcome } from '../models'
+import { combatInjuryFromHealth } from '../core/combat/combatPresentation'
+import { CombatStrategy, type CombatContext, type CombatEnemyType, type CombatLoot, type CombatOutcome } from '../models'
+import { bindArtifact, emptyEquipment, equipItem, nourishBoundArtifact, unequipItem, unbindArtifact } from '../core/items/equipment'
+import { decayPillToxicity, recordPill, usePill } from '../core/items/pills'
+import { craftItem } from '../core/items/recipes'
+import { SECRET_REALMS, secretRealmById } from '../data/secretRealms'
+import { canEnterSecretRealm, completeSecretRealmEncounter, continueSecretRealm as continueRealmRun, createSecretRealmHistory, createSecretRealmRun, escapeSecretRealm as markSecretRealmEscaped, initialSecretRealmStates, loseSecretRealmRewards, nextSecretRealmEncounter, openSecretRealm, secretRealmRisk } from '../core/secretRealm/secretRealm'
+import { sectOfferings } from '../data/sectOfferings'
+import { pillById } from '../data/pills'
+import { RECIPES } from '../data/recipes'
 
 function emptySave(): GameSave {
   const now = new Date().toISOString()
   return {
     id: 'main', version: CURRENT_SAVE_VERSION, createdAt: now, updatedAt: now, player: null, world: createWorld(), lifeRecords: [],
     reincarnation: initialReincarnation(), settings: { fortunateMode: true, autoSave: true, logLimit: 120 },
-    pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0 }, logs: [], pendingEvent: null, pendingLifeEvent: null, currentAction: null, pendingCombat: null,
+    pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0 }, logs: [], pendingEvent: null, pendingLifeEvent: null, currentAction: null, pendingCombat: null, secretRealmRun: null,
   }
 }
 
@@ -72,7 +81,7 @@ export function transferInventory(source: InventoryItem[], target: InventoryItem
 
 export const useGameStore = defineStore('game', () => {
   const state = reactive<GameSave>(emptySave())
-  const ready = reactive({ loaded: false, saving: false, lastSaved: '', debugSecret: '', eventResultTitle: '', eventResultText: '' })
+  const ready = reactive({ loaded: false, saving: false, lastSaved: '', debugSecret: '', eventResultTitle: '', eventResultText: '', combatAnimationSkipToken: 0 })
   let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   const player = computed(() => state.player)
@@ -82,9 +91,12 @@ export const useGameStore = defineStore('game', () => {
   const pendingEvent = computed(() => state.pendingEvent ? eventById(state.pendingEvent.eventId) : undefined)
   const pendingLifeEvent = computed(() => state.pendingLifeEvent ? lifeEventById(state.pendingLifeEvent.eventId) : undefined)
   const pendingCombat = computed(() => state.pendingCombat ?? undefined)
+  const activeSecretRealm = computed(() => state.secretRealmRun ? secretRealmById(state.secretRealmRun.secretRealmId) : undefined)
+  const availableSecretRealms = computed(() => state.player ? SECRET_REALMS.map((realm) => ({ realm, access: state.player!.secretRealmStates.find((entry) => entry.secretRealmId === realm.id), risk: secretRealmRisk(calculateCombatPower(state.player!, state.world).total, realm) })) : [])
   const combatPower = computed(() => state.player ? calculateCombatPower(state.player, state.world) : undefined)
   const combatAssessment = computed(() => state.player && state.pendingCombat ? combatStrengthLabel(calculateCombatPower(state.player, state.world).total, state.pendingCombat.enemy.combatPower) : '')
   const currentSect = computed(() => sectById(state.world.sects, state.player?.sectMembership?.sectId))
+  const currentSectOfferings = computed(() => sectOfferings(currentSect.value?.type))
   const sectPeers = computed(() => state.player?.sectMembership ? state.world.npcCultivators.filter((npc) => npc.sectId === state.player!.sectMembership!.sectId && npc.alive).sort((a, b) => b.realmIndex - a.realmIndex) : [])
   const ageYears = computed(() => Math.floor((state.player?.ageMonths ?? 0) / 12))
   const remainingYears = computed(() => Math.max(0, Math.ceil(((state.player?.lifespanMonths ?? 0) - (state.player?.ageMonths ?? 0)) / 12)))
@@ -140,7 +152,7 @@ export const useGameStore = defineStore('game', () => {
   function createFamily(current: Player): FamilyState {
     return {
       id: current.familyId, name: current.bloodline.familyName, founderId: current.id, foundedYear: state.world.currentYear,
-      wealth: 0, inventory: [], reputation: 0, bloodline: current.bloodline, memberIds: [current.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [],
+      wealth: 0, inventory: [], reputation: 0, bloodline: current.bloodline, memberIds: [current.id], kind: '凡人家族', resources: 0, fame: 0, territory: '故乡村镇', history: [], inheritedArtifacts: [],
     }
   }
 
@@ -161,6 +173,7 @@ export const useGameStore = defineStore('game', () => {
     state.pendingEvent = null
     state.pendingLifeEvent = null
     state.pendingCombat = null
+    state.secretRealmRun = null
     ready.eventResultTitle = ''
     ready.eventResultText = ''
     timeline(`${created.name}生于${created.origin.name}，十六岁踏上寻仙路。`, 'life')
@@ -222,11 +235,21 @@ export const useGameStore = defineStore('game', () => {
     if (masterLink && master && !master.alive) { masterLink.status = 'ended'; recordSocialMoment(`师父${master.name}寿尽坐化，师徒缘分止于此年。`, 'relationship', true) }
     addMonths(state.world, months)
     state.player.ageMonths += months
+    decayPillToxicity(state.player, months)
     const sect = sectById(state.world.sects, state.player.sectMembership?.sectId)
     if (sect && months >= 12) {
       const stipend = sectStipend(state.player, sect, months / 12)
       state.player.spiritStones += stipend
       if (stipend) timeline(`领取${sect.name}${state.player.sectMembership?.position}年俸 ${stipend} 枚灵石。`, 'loot')
+    }
+    if (months >= 12 && random.chance(Math.min(.16, months / 240))) {
+      const livingNpcs = state.world.npcCultivators.filter((entry) => entry.alive)
+      const npc = livingNpcs.length ? random.pick(livingNpcs) : undefined
+      const discovered = state.player.secretRealmStates.filter((entry) => entry.discovered)
+      if (npc && discovered.length) {
+        const realm = secretRealmById(random.pick(discovered).secretRealmId)
+        if (realm) state.world.worldEvents.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: random.chance(.82) ? `${npc.name}进入${realm.name}历练，据传有所收获。` : `${npc.name}失踪于${realm.name}深处，宗门魂灯黯淡。` })
+      }
     }
     const ageAfter = Math.floor(state.player.ageMonths / 12)
     if (state.player.primaryPath === 'ghost') {
@@ -276,6 +299,8 @@ export const useGameStore = defineStore('game', () => {
     if (log.importance >= 3) recordLifeMoment(`${result.title}：${result.summary}`, result.resultType === 'danger' || result.resultType === 'inner-demon' ? 'danger' : 'inheritance', log.importance)
     timeline(`${result.title}：${result.summary}`, result.resultType === 'danger' || result.resultType === 'inner-demon' ? 'event' : 'life')
     advanceTime(result.years * 12)
+    if (current.alive && current.boundArtifact) nourishBoundArtifact(current, Math.max(1, result.years * (action === CultivationAction.MEDITATION ? 16 : action === CultivationAction.ENLIGHTENMENT ? 13 : action === CultivationAction.ADVENTURE ? 9 : 5)), action === CultivationAction.ENLIGHTENMENT ? 2 : 1)
+    if (current.alive && action === CultivationAction.RECOVERY) decayPillToxicity(current, result.years * 12, true)
     if (current.alive && result.resultType === 'inner-demon' && current.pathResources.innerDemon >= 90 && random.chance(.08 + current.pathResources.innerDemon * .0012)) {
       const cause = '闭关时心魔失控，道心崩毁而亡'
       recordLifeMoment(cause, 'death', 4)
@@ -346,9 +371,14 @@ export const useGameStore = defineStore('game', () => {
     scheduleSave()
   }
 
-  function addItem(itemId: string, quantity = 1) {
+  function addItem(itemId: string, quantity = 1, source?: { location: string; source: string }) {
     if (!state.player) return
     mergeInventory(state.player.inventory, [{ itemId, quantity }])
+    const definition = itemById(itemId)
+    const qualityRank = ['凡品', '良品', '精品', '稀有', '珍品', '极品', '奇珍', '传说'].indexOf(definition?.quality ?? '凡品')
+    if (source && definition && qualityRank >= 4 && !state.player.itemSourceHistory.some((entry) => entry.itemId === itemId && entry.year === state.world.currentYear && entry.location === source.location)) {
+      state.player.itemSourceHistory.unshift({ itemId, year: state.world.currentYear, location: source.location, source: source.source })
+    }
   }
 
   function joinPlayerSect(sectId: string) {
@@ -390,6 +420,19 @@ export const useGameStore = defineStore('game', () => {
     const technique = techniqueById(techniqueId)
     if (technique) current.inheritanceHistory.push({ eventId: `sect:${sect.id}`, name: technique.name, year: state.world.currentYear, source: `${sect.name}贡献兑换` })
     recordSocialMoment(`以宗门贡献换得《${technique?.name ?? techniqueId}》。`, 'sect', true)
+    scheduleSave()
+    return true
+  }
+
+  function exchangeSectOffering(offeringId: string) {
+    const current = state.player
+    const sect = currentSect.value
+    const offering = sectOfferings(sect?.type).find((entry) => entry.id === offeringId)
+    if (!current?.sectMembership || !sect || !offering || current.sectMembership.contribution < offering.cost) return false
+    current.sectMembership.contribution -= offering.cost
+    if (offering.itemId) addItem(offering.itemId, 1, { location: sect.name, source: '宗门贡献兑换' })
+    if (offering.secretRealmId) openSecretRealm(current.secretRealmStates, offering.secretRealmId, `${sect.name}秘境名额`, state.world.currentYear + 10)
+    recordSocialMoment(`以 ${offering.cost} 宗门贡献换得「${offering.name}」。`, 'sect', Boolean(offering.secretRealmId))
     scheduleSave()
     return true
   }
@@ -640,7 +683,11 @@ export const useGameStore = defineStore('game', () => {
       state.pendingLifeEvent = null
       const enemyType: CombatEnemyType = event.tags.includes('beast') ? 'beast' : event.tags.includes('sect') || event.dangerTags.includes('sect-war') || event.dangerTags.includes('revenge') ? 'sect' : 'cultivator'
       const difficulty = Math.max(-1, Math.min(3, (event.recommendedRealmIndex ?? current.realmIndex) - current.realmIndex))
-      startCombat(enemyType, difficulty, 'event', event.name)
+      const sourceType: CombatContext['sourceType'] = event.tags.includes('sect') ? 'SECT_EVENT' : event.tags.includes('family') ? 'FAMILY_EVENT' : 'LIFE_EVENT'
+      startCombat(enemyType, difficulty, 'event', event.name, undefined, {
+        sourceType, sourceId: event.id, eventChoiceId: choiceId, location: event.name, riskLevel: event.riskLevel, mode: 'overlay',
+        returnState: { label: sourceType === 'SECT_EVENT' ? '返回宗门' : '继续事件', resultText: resolved.choice.result },
+      })
       if (state.pendingCombat) { state.pendingCombat.sourceEventId = event.id; state.pendingCombat.victoryEffects = resolved.choice.effects.map((effect) => ({ ...effect })) }
       scheduleSave()
       return true
@@ -697,7 +744,10 @@ export const useGameStore = defineStore('game', () => {
     advanceTime(3)
     if (!state.player.alive) return
     if (random.chance(.36)) {
-      startCombat(random.chance(.62) ? 'beast' : 'cultivator', random.chance(.18) ? 1 : 0, 'adventure', random.pick(['青云山脉', '赤炎谷', '阴魂岭', '寒潭水域']))
+      const location = random.pick(['青云山脉', '赤炎谷', '阴魂岭', '寒潭水域'])
+      startCombat(random.chance(.62) ? 'beast' : 'cultivator', random.chance(.18) ? 1 : 0, 'adventure', location, undefined, {
+        sourceType: 'ADVENTURE', sourceId: location, location, riskLevel: 2, mode: 'overlay', returnState: { label: '继续历练', resultText: `你在${location}处理完这场遭遇，重新踏上历练之路。` },
+      })
       scheduleSave()
       return
     }
@@ -712,6 +762,90 @@ export const useGameStore = defineStore('game', () => {
     scheduleSave()
   }
 
+  function enterSecretRealm(realmId: string) {
+    const current = state.player
+    const realm = secretRealmById(realmId)
+    if (!current?.alive || !realm || state.secretRealmRun || state.pendingCombat || !canEnterSecretRealm(current, realm, state.world.currentYear)) return false
+    state.secretRealmRun = createSecretRealmRun(realmId)
+    timeline(`进入「${realm.name}」，此行战利品将在安全撤离后收入乾坤袋。`, 'event')
+    scheduleSave()
+    return true
+  }
+
+  function resolveSecretRealmEncounter() {
+    const current = state.player
+    const run = state.secretRealmRun
+    const encounter = run?.pendingEncounter
+    const realm = run && secretRealmById(run.secretRealmId)
+    if (!current?.alive || !run || !encounter || !realm || encounter.type === 'COMBAT') return false
+    if (encounter.type === 'HAZARD') {
+      const protection = Math.min(.65, current.equipment.artifactSlots.includes('restriction-awl') ? .28 : 0)
+      if (random.chance(Math.max(.03, (encounter.injuryChance ?? .12) * (1 - protection)))) {
+        const serious = encounter.risk >= 4 && random.chance(.45)
+        addCharacterState(current, serious ? CharacterState.SERIOUS_INJURY : CharacterState.INJURED)
+        run.injuries.push(serious ? '重伤' : '轻伤')
+        run.eventHistory.push(`${encounter.name}中触动禁制，${serious ? '身受重伤' : '受了轻伤'}。`)
+      }
+    }
+    completeSecretRealmEncounter(run, encounter)
+    timeline(`秘境第${run.currentDepth}层「${encounter.name}」探索完成。`, encounter.type === 'TREASURE' ? 'loot' : 'event')
+    scheduleSave()
+    return true
+  }
+
+  function exploreSecretRealm() {
+    const current = state.player
+    const run = state.secretRealmRun
+    const realm = run && secretRealmById(run.secretRealmId)
+    if (!current?.alive || !run || !realm || state.pendingCombat) return false
+    const encounter = nextSecretRealmEncounter(run)
+    if (!encounter) return false
+    if (encounter.type === 'COMBAT') {
+      const location = `${realm.name}第${run.currentDepth}层 · ${encounter.name}`
+      startCombat(encounter.enemyType ?? 'beast', encounter.enemyDifficulty ?? 0, 'secretRealm', location, undefined, { sourceType: 'SECRET_REALM', sourceId: encounter.id, location, riskLevel: encounter.risk, mode: 'overlay', returnState: { label: '返回秘境', resultText: `战斗结束，你仍在${realm.name}第${run.currentDepth}层。` } })
+    } else resolveSecretRealmEncounter()
+    scheduleSave()
+    return true
+  }
+
+  function continueSecretRealm() {
+    const run = state.secretRealmRun
+    if (!run || !continueRealmRun(run)) return false
+    scheduleSave()
+    return true
+  }
+
+  function leaveSecretRealm() {
+    const current = state.player
+    const run = state.secretRealmRun
+    const realm = run && secretRealmById(run.secretRealmId)
+    if (!current || !run || !realm || !markSecretRealmEscaped(run)) return false
+    const status = run.status
+    for (const reward of run.collectedRewards) addItem(reward.itemId, reward.quantity, { location: `${realm.name}第${run.currentDepth}层`, source: status === 'CLEARED' ? '秘境通关' : '秘境撤离' })
+    current.secretRealmHistory.unshift(createSecretRealmHistory(run, state.world.currentYear))
+    if (status === 'CLEARED') {
+      const first = current.secretRealmHistory.filter((entry) => entry.secretRealmId === realm.id && entry.status === 'CLEARED').length === 1
+      if (first) recordLifeMoment(`首次通关${realm.name}，从最深处带回传承。`, 'inheritance', 4)
+      timeline(`通关${realm.name}，安全带回全部战利品。`, 'realm')
+    } else timeline(`从${realm.name}第${run.currentDepth}层主动撤离，安全带回战利品。`, 'loot')
+    state.secretRealmRun = null
+    scheduleSave()
+    return true
+  }
+
+  function failSecretRealm(cause = '秘境禁制爆发，陨落其中') {
+    const current = state.player
+    const run = state.secretRealmRun
+    const realm = run && secretRealmById(run.secretRealmId)
+    if (!current?.alive || !run || !realm) return false
+    loseSecretRealmRewards(run)
+    current.secretRealmHistory.unshift(createSecretRealmHistory(run, state.world.currentYear))
+    recordLifeMoment(`深入${realm.name}第${run.currentDepth}层，${cause}。`, 'death', 4)
+    die(cause, { category: 'restriction', description: cause, eventId: realm.id })
+    scheduleSave()
+    return true
+  }
+
   function refreshCombatPower() {
     if (!state.player) return 0
     state.player.combatPower = calculateCombatPower(state.player, state.world).total
@@ -719,13 +853,14 @@ export const useGameStore = defineStore('game', () => {
     return state.player.combatPower
   }
 
-  function startCombat(type: CombatEnemyType = 'beast', difficulty = 0, source: NonNullable<GameSave['pendingCombat']>['source'] = 'adventure', environment = '荒野', npcId?: string) {
+  function startCombat(type: CombatEnemyType = 'beast', difficulty = 0, source: NonNullable<GameSave['pendingCombat']>['source'] = 'adventure', environment = '荒野', npcId?: string, context?: CombatContext) {
     const current = state.player
     if (!current?.alive || state.pendingCombat || (source !== 'event' && (state.pendingEvent || state.pendingLifeEvent)) || (state.currentAction && source !== 'adventure')) return false
     const npc = npcId ? state.world.npcCultivators.find((entry) => entry.id === npcId && entry.alive) : undefined
     refreshCombatPower()
     const enemy = createCombatEnemy(current, type, random, difficulty, npc ? { id: npc.id, name: npc.name, realmIndex: npc.realmIndex, path: npc.path, combatPower: npc.combatPower, spiritRoot: npc.spiritRoot } : undefined)
-    state.pendingCombat = { enemy, environment, source }
+    const sourceType: CombatContext['sourceType'] = source === 'adventure' ? 'ADVENTURE' : source === 'sect' ? 'SECT_EVENT' : source === 'family' ? 'FAMILY_EVENT' : source === 'secretRealm' ? 'SECRET_REALM' : source === 'debug' ? 'DEBUG' : 'LIFE_EVENT'
+    state.pendingCombat = { enemy, environment, source, context: context ?? { sourceType, sourceId: npcId ?? environment, location: environment, riskLevel: Math.max(0, Math.min(4, difficulty + 2)), mode: 'overlay', returnState: { label: source === 'adventure' ? '继续历练' : source === 'sect' ? '返回宗门' : source === 'debug' ? '结束演武' : '继续事件' } } }
     timeline(`在${environment}遭遇${enemy.name}，对方战力约为 ${enemy.combatPower.toLocaleString()}。`, 'event')
     scheduleSave()
     return true
@@ -733,15 +868,20 @@ export const useGameStore = defineStore('game', () => {
 
   function startNPCCombat(npcId: string, source: NonNullable<GameSave['pendingCombat']>['source'] = 'sect') {
     const npc = state.world.npcCultivators.find((entry) => entry.id === npcId)
-    return npc ? startCombat('rival', 0, source, source === 'sect' ? '宗门演武台' : '荒野', npcId) : false
+    const location = source === 'sect' ? '宗门演武台' : '荒野'
+    return npc ? startCombat('rival', 0, source, location, npcId, { sourceType: source === 'sect' ? 'NPC_DUEL' : 'LIFE_EVENT', sourceId: npcId, location, riskLevel: source === 'sect' ? 0 : 2, mode: 'overlay', returnState: { label: source === 'sect' ? '返回宗门' : '继续事件', resultText: source === 'sect' ? `与${npc.name}的切磋已经结束。` : undefined } }) : false
   }
 
   function resolvePendingCombat(strategy: CombatStrategy, battleCardId?: string, forceOutcome?: CombatOutcome) {
     const current = state.player
     const pending = state.pendingCombat
     if (!current?.alive || !pending) return undefined
+    const stonesBefore = current.spiritStones
+    const cultivationBefore = current.cultivation
+    const inventoryBefore = new Map(current.inventory.map((entry) => [entry.itemId, entry.quantity]))
     const card = battleCardId ? current.battleCards.find((entry) => entry.id === battleCardId && entry.charges > 0) : undefined
     const record = resolveCombat(current, pending.enemy, strategy, pending.environment, state.world, random, { battleCard: card, forceOutcome })
+    record.context = pending.context
     if (pending.source === 'sect' && record.outcome === 'death') { record.outcome = 'defeat'; record.summary = `切磋不敌${pending.enemy.name}，被同门及时救下。` }
     if (card) {
       card.charges--
@@ -750,6 +890,11 @@ export const useGameStore = defineStore('game', () => {
         current.lifespanMonths = calculateMaxLifespanMonths(current)
       }
       current.battleCards = current.battleCards.filter((entry) => entry.charges > 0)
+      if (card.id === 'qi-burst-pill') {
+        const pill = pillById('qi-burst-pill')
+        if (pill) recordPill(current, pill, state.world.currentYear, .15)
+        if (record.outcome !== 'death' && random.chance(.35)) addCharacterState(current, CharacterState.INJURED)
+      }
     }
     if (current.primaryPath === 'demonic' && strategy === CombatStrategy.DESPERATE) {
       current.lifespanBonusMonths -= 12
@@ -757,7 +902,9 @@ export const useGameStore = defineStore('game', () => {
       current.lifespanMonths = calculateMaxLifespanMonths(current)
     }
     current.battleStats.battles++
-    current.battleStats.experience += Math.max(5, Math.round(pending.enemy.combatPower / Math.max(30, current.combatPower) * 20))
+    const experienceGained = Math.max(5, Math.round(pending.enemy.combatPower / Math.max(30, current.combatPower) * 20))
+    current.battleStats.experience += experienceGained
+    record.experienceGained = experienceGained
     const npcOpponent = pending.enemy.npcId ? state.world.npcCultivators.find((entry) => entry.id === pending.enemy.npcId) : undefined
     if (npcOpponent) { npcOpponent.battleStats.battles++; npcOpponent.battleStats.experience += 10 }
     if (record.outcome === 'victory') {
@@ -766,9 +913,11 @@ export const useGameStore = defineStore('game', () => {
       if (pending.source !== 'sect') current.battleStats.kills++
       if (pending.enemy.type === 'beast') current.battleStats.beastKills++
       if (record.enemyPower > record.playerPower) current.battleStats.upsetWins++
-      current.spiritStones += pending.enemy.rewardStones
-      if (pending.enemy.rewardItemId) addItem(pending.enemy.rewardItemId)
-      if (pending.enemy.type === 'beast') current.resources.beastCores += Math.max(1, Math.round(pending.enemy.realmIndex / 4))
+      if (pending.source !== 'secretRealm') {
+        current.spiritStones += pending.enemy.rewardStones
+        if (pending.enemy.rewardItemId) addItem(pending.enemy.rewardItemId)
+        if (pending.enemy.type === 'beast') current.resources.beastCores += Math.max(1, Math.round(pending.enemy.realmIndex / 4))
+      }
       if (npcOpponent) { npcOpponent.battleStats.losses++; npcOpponent.battleStats.winStreak = 0 }
       if (npcOpponent && pending.source !== 'sect') { npcOpponent.alive = false; npcOpponent.deathYear = state.world.currentYear }
       if ((pending.enemy.type === 'cultivator' || pending.enemy.type === 'sect') && pending.source !== 'sect') addFateTag(current, { id: 'KILLED_DISCIPLE', name: '杀修因果', description: '斗法中取走修士性命，或将引来后续追索。', createdAt: state.world.currentYear })
@@ -786,16 +935,54 @@ export const useGameStore = defineStore('game', () => {
         if (record.enemyPower > record.playerPower * 1.3) { current.severeInjuryCount++; modifyStat('constitution', -1, `与${record.enemyName}斗法落败`) }
       }
     }
+    const healthInjury = combatInjuryFromHealth(record.playerHealthRemaining ?? record.playerHealthMax ?? 1, record.playerHealthMax ?? 1, record.outcome === 'death')
+    if (record.outcome !== 'death' && (healthInjury === 'serious' || healthInjury === 'near-death') && !current.characterStates.includes(CharacterState.SERIOUS_INJURY)) {
+      addCharacterState(current, CharacterState.SERIOUS_INJURY)
+      current.severeInjuryCount++
+    } else if (record.outcome !== 'death' && healthInjury === 'injured' && !current.characterStates.includes(CharacterState.INJURED) && !current.characterStates.includes(CharacterState.SERIOUS_INJURY)) addCharacterState(current, CharacterState.INJURED)
     current.combatHistory.unshift(record)
     current.combatHistory.splice(120)
+    const loot: CombatLoot[] = []
+    const stonesGained = current.spiritStones - stonesBefore
+    if (stonesGained > 0) loot.push({ id: 'spirit-stones', name: '灵石', quantity: stonesGained, type: 'stones' })
+    for (const stack of current.inventory) {
+      const gained = stack.quantity - (inventoryBefore.get(stack.itemId) ?? 0)
+      if (gained > 0) loot.push({ id: stack.itemId, name: itemById(stack.itemId)?.name ?? stack.itemId, quantity: gained, type: 'item' })
+    }
+    if (record.outcome === 'victory' && pending.enemy.type === 'beast') loot.push({ id: 'beast-cores', name: '妖丹资源', quantity: Math.max(1, Math.round(pending.enemy.realmIndex / 4)), type: 'resource' })
+    const cultivationGained = current.cultivation - cultivationBefore
+    if (cultivationGained > 0) loot.push({ id: 'cultivation', name: '修为', quantity: cultivationGained, type: 'cultivation' })
+    loot.push({ id: 'battle-experience', name: '战斗经验', quantity: experienceGained, type: 'experience' })
+    record.loot = loot
+    if (pending.source === 'secretRealm' && state.secretRealmRun?.pendingEncounter) {
+      const encounter = state.secretRealmRun.pendingEncounter
+      if (record.outcome === 'victory') {
+        completeSecretRealmEncounter(state.secretRealmRun, encounter)
+        for (const reward of encounter.rewards) record.loot.push({ id: reward.itemId, name: itemById(reward.itemId)?.name ?? reward.itemId, quantity: reward.quantity, type: 'item' })
+      } else if (record.outcome !== 'death') {
+        state.secretRealmRun.eventHistory.push(`第${state.secretRealmRun.currentDepth}层与${record.enemyName}交锋后负伤退开。`)
+        state.secretRealmRun.pendingEncounter = undefined
+        state.secretRealmRun.awaitingDecision = true
+      }
+      if (current.boundArtifact) nourishBoundArtifact(current, record.outcome === 'victory' ? 14 : 6, 1)
+    }
+    if (record.outcome === 'death') record.injury = 'death'
+    else if (current.characterStates.includes(CharacterState.SERIOUS_INJURY)) record.injury = 'serious'
+    else if (current.characterStates.includes(CharacterState.INJURED)) record.injury = 'injured'
+    else record.injury = combatInjuryFromHealth(record.playerHealthRemaining ?? record.playerHealthMax ?? 1, record.playerHealthMax ?? 1)
     const unlocked = unlockBattleAchievements(current, record)
     refreshCombatPower()
     timeline(`斗法${record.outcome === 'victory' ? '告捷' : record.outcome === 'escape' ? '避战脱身' : record.outcome === 'death' ? '身死' : '落败'}：${record.summary}`, record.outcome === 'victory' ? 'realm' : 'event')
     if (record.legendary) recordLifeMoment(`${REALMS[current.realmIndex].name}时越境击败${record.enemyName}，一战扬名。`, 'combat', 4)
-    else if (record.outcome !== 'escape') recordLifeMoment(`与${record.enemyName}斗法，${record.summary}`, 'combat', record.outcome === 'victory' ? 2 : 3)
+    else if (record.outcome === 'defeat' || record.outcome === 'death') recordLifeMoment(`与${record.enemyName}斗法，${record.summary}`, 'combat', 3)
     for (const achievement of unlocked) recordLifeMoment(`获得战斗成就【${achievement}】。`, 'combat', 3)
     state.pendingCombat = null
-    if (record.outcome === 'death') die(`在${record.environment}与${record.enemyName}斗法，力战而亡`, { category: 'combat', description: record.summary })
+    if (record.outcome !== 'death' && pending.context && ['LIFE_EVENT', 'SECT_EVENT', 'FAMILY_EVENT', 'NPC_DUEL'].includes(pending.context.sourceType)) {
+      ready.eventResultTitle = record.outcome === 'victory' ? `${record.enemyName} · 战斗胜利` : record.outcome === 'escape' ? '成功脱离战斗' : '负伤脱身'
+      ready.eventResultText = `${record.summary}${record.outcome === 'victory' && pending.context.returnState?.resultText ? ` ${pending.context.returnState.resultText}` : ''}`
+    }
+    if (record.outcome === 'death' && pending.source === 'secretRealm') failSecretRealm(`与${record.enemyName}斗法，力战而亡`)
+    else if (record.outcome === 'death') die(`在${record.environment}与${record.enemyName}斗法，力战而亡`, { category: 'combat', description: record.summary })
     scheduleSave()
     return record
   }
@@ -814,7 +1001,7 @@ export const useGameStore = defineStore('game', () => {
     const targetRealm = REALMS[current.realmIndex + 1]
     const major = isMajorBreakthrough(current.realmIndex + 1)
     const lifespanBefore = current.lifespanMonths
-    consumeBreakthroughAid(current, calculation.aid)
+    consumeBreakthroughAid(current, calculation.aid, state.world.currentYear)
     if (calculation.aid.lifespanMonths) current.lifespanMonths = calculateMaxLifespanMonths(current)
     let succeeded = false
     let resultText = ''
@@ -895,6 +1082,13 @@ export const useGameStore = defineStore('game', () => {
     family.reputation += current.realmIndex * 2 + current.achievements.length * 5
     family.resources += Math.floor(current.spiritStones * .2)
     family.fame = Math.min(100, family.fame + current.realmIndex)
+    if (current.boundArtifact && !family.inheritedArtifacts?.some((entry) => entry.ownerId === current.id && entry.artifactId === current.boundArtifact!.artifactId)) {
+      const definition = itemById(current.boundArtifact.artifactId)
+      family.inheritedArtifacts ??= []
+      family.inheritedArtifacts.push({ artifactId: current.boundArtifact.artifactId, artifactName: definition?.name ?? current.boundArtifact.artifactId, ownerName: current.name, ownerId: current.id, nourishment: current.boundArtifact.nourishment, affinity: current.boundArtifact.affinity, sourceHistory: current.itemSourceHistory.filter((entry) => entry.itemId === current.boundArtifact!.artifactId).map((entry) => ({ ...entry, inheritedFrom: current.name })) })
+      mergeInventory(family.inventory, [{ itemId: current.boundArtifact.artifactId, quantity: 1 }])
+      family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${definition?.name ?? '本命法宝'}成为${family.name}传承法宝，曾为${current.name}本命之物。`, type: 'family' })
+    }
   }
 
   function die(cause: string, detail?: Player['deathCause']) {
@@ -984,6 +1178,7 @@ export const useGameStore = defineStore('game', () => {
       bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
       eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
       combatPower: 0, combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [], battleStats: initialBattleStats(),
+      equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill', 'make-healing-pill', 'forge-green-edge'], secretRealmStates: initialSecretRealmStates(), secretRealmHistory: [], itemSourceHistory: family?.inheritedArtifacts?.flatMap((entry) => entry.sourceHistory.map((source) => ({ ...source }))) ?? [],
     }
     state.player.lifespanMonths = calculateMaxLifespanMonths(state.player)
     if (family) { family.wealth = Math.ceil(family.wealth * .5); family.resources = Math.ceil(family.resources * .5); family.history.unshift({ id: crypto.randomUUID(), year: state.world.currentYear, text: `${descendant.name}继承家族血脉与部分资产。`, type: 'family' }); transferInventory(family.inventory, state.player.inventory) }
@@ -1021,7 +1216,14 @@ export const useGameStore = defineStore('game', () => {
     const current = state.player
     const stack = current?.inventory.find((entry) => entry.itemId === itemId)
     const definition = itemById(itemId)
-    if (!current?.alive || !stack || !definition?.effects?.length) return
+    if (!current?.alive || !stack || !definition) return false
+    if (definition.pill) {
+      const result = usePill(current, itemId, state.world.currentYear)
+      if (!result.ok) { ready.eventResultTitle = definition.name; ready.eventResultText = result.message; return false }
+      timeline(`服用「${definition.name}」，${result.message}，当前丹毒 ${Math.round(current.pillToxicity)}。`, 'loot')
+      refreshCombatPower(); scheduleSave(); return true
+    }
+    if (!definition.effects?.length) return false
     for (const effect of definition.effects) {
       if (effect.type === 'cultivation') current.cultivation += effect.value
       if (effect.type === 'lifespan') current.lifespanMonths += effect.value
@@ -1031,11 +1233,57 @@ export const useGameStore = defineStore('game', () => {
     if (stack.quantity <= 0) current.inventory = current.inventory.filter((entry) => entry.itemId !== itemId)
     timeline(`服用「${definition.name}」，药力在体内化开。`, 'loot')
     scheduleSave()
+    return true
+  }
+
+  function equipInventoryItem(itemId: string) {
+    const current = state.player
+    if (!current) return false
+    const result = equipItem(current, itemId)
+    if (!result.ok) { ready.eventResultTitle = '无法装备'; ready.eventResultText = result.reason; return false }
+    const definition = itemById(itemId)
+    current.lifespanMonths = calculateMaxLifespanMonths(current)
+    refreshCombatPower()
+    timeline(`装备「${definition?.name ?? itemId}」，当前战力 ${current.combatPower.toLocaleString()}。`, 'loot')
+    scheduleSave()
+    return true
+  }
+
+  function unequipInventoryItem(itemId: string) {
+    const current = state.player
+    if (!current || !unequipItem(current, itemId)) return false
+    current.lifespanMonths = calculateMaxLifespanMonths(current)
+    refreshCombatPower(); timeline(`卸下「${itemById(itemId)?.name ?? itemId}」。`, 'loot'); scheduleSave(); return true
+  }
+
+  function bindArtifactItem(itemId: string) {
+    const current = state.player
+    if (!current || !bindArtifact(current, itemId, state.world.currentYear)) return false
+    recordLifeMoment(`首次将「${itemById(itemId)?.name ?? itemId}」炼为本命法宝。`, 'inheritance', 4)
+    refreshCombatPower(); scheduleSave(); return true
+  }
+
+  function unbindArtifactItem() {
+    if (!state.player || !unbindArtifact(state.player)) return false
+    refreshCombatPower(); scheduleSave(); return true
+  }
+
+  function nourishArtifact(amount = 20, affinity = 1) {
+    if (!state.player || !nourishBoundArtifact(state.player, amount, affinity)) return false
+    refreshCombatPower(); scheduleSave(); return true
+  }
+
+  function craftRecipe(recipeId: string) {
+    const current = state.player
+    if (!current || !craftItem(current, recipeId)) return false
+    timeline(`完成「${RECIPES.find((entry) => entry.id === recipeId)?.name ?? '炼制'}」。`, 'loot')
+    scheduleSave(); return true
   }
 
   function equipArtifactFromItem(itemId: string) {
     const current = state.player
     if (!current?.inventory.some((entry) => entry.itemId === itemId && entry.quantity > 0)) return false
+    if (itemById(itemId)?.equipmentSlot) return equipInventoryItem(itemId)
     const artifactId = itemId === 'sword' ? 'green-edge-sword' : itemId === 'bell' ? 'soul-bell' : itemId === 'seal' ? 'mountain-armor' : undefined
     const artifact = ARTIFACT_CATALOG.find((entry) => entry.id === artifactId)
     if (!artifact) return false
@@ -1050,8 +1298,15 @@ export const useGameStore = defineStore('game', () => {
     const current = state.player
     const stack = current?.inventory.find((entry) => entry.itemId === itemId && entry.quantity > 0)
     if (!current || !stack) return false
-    const cardId = itemId === 'qi-pill' || itemId === 'spirit-dew' || itemId === 'foundation-pill' ? 'life-saving-pill' : undefined
-    const card = BATTLE_CARD_CATALOG.find((entry) => entry.id === cardId)
+    const definition = itemById(itemId)
+    if (definition?.artifact?.activeEffect) {
+      const active = definition.artifact.activeEffect
+      const owned = current.battleCards.find((entry) => entry.id === `artifact:${itemId}`)
+      if (!owned) current.battleCards.push({ id: `artifact:${itemId}`, name: definition.name, type: 'artifact', description: active.description, powerMultiplier: active.type === 'POWER_BURST' || active.type === 'SOUL_DISRUPTION' ? active.value : 0, defenseMultiplier: active.type === 'PROTECTION' ? active.value : 0, escapeBonus: active.type === 'ESCAPE' ? active.value : 0, lifespanCost: 0, charges: 1 })
+      timeline(`祭起法宝「${definition.name}」，已可在下一场斗法中催动。`, 'loot'); scheduleSave(); return true
+    }
+    const cardId = itemId === 'qi-burst-pill' ? 'qi-burst-pill' : itemId === 'heart-protection-pill' || itemId === 'qi-pill' || itemId === 'spirit-dew' ? 'life-saving-pill' : undefined
+    const card = cardId === 'qi-burst-pill' ? { id: 'qi-burst-pill', name: '爆气丹', type: 'pill' as const, description: '丹力骤然爆发，战后经脉疲惫。', powerMultiplier: .15, defenseMultiplier: -.04, escapeBonus: 0, lifespanCost: 0, charges: 1 } : BATTLE_CARD_CATALOG.find((entry) => entry.id === cardId)
     if (!card) return false
     stack.quantity--
     if (stack.quantity <= 0) current.inventory = current.inventory.filter((entry) => entry.itemId !== itemId)
@@ -1066,7 +1321,7 @@ export const useGameStore = defineStore('game', () => {
   async function resetGame() { await SaveService.remove(); replaceState(emptySave()) }
 
   type DebugAction = 'cultivation' | 'stones' | 'age' | 'age80' | 'age90' | 'age99' | 'event' | 'lifeEvent' | 'lifeEventPool' | 'addFateTag' | 'removeFateTag' | 'fateProgress' | 'lifeTimeline' | 'jumpAge' | 'death' | 'points' | 'unlockTalents' | 'descendant' | 'adultDescendants' | 'secret' | 'toggleGeneration' | 'hall' | 'pathDao' | 'pathSword' | 'pathBody' | 'pathDemonic' | 'pathGhost' | 'pathExperience' | 'swordIntent' | 'qiBlood' | 'demonicNature' | 'innerDemon' | 'karma' | 'soulStability' | 'majorLifespan' | 'rootTreasure' | 'rootTribulation' | 'rootInheritance' | 'rootBloodline' | 'rootTheft' | 'rootReincarnation' | 'rootPurify' | 'rootStabilize' | 'elementGrowth' | 'elements80' | 'balance90' | 'triggerFiveInsight' | 'grantFiveUnity' | 'checkAcquiredTalents' | 'unlockAcquiredTalents' | 'unlockTechniques' | 'techniqueExperience' | 'techniqueAffinity' | 'nearDeath' | 'breakthroughReady' | 'simulateBreakthrough' | 'addResources' | 'addInjury' | 'addInnerDemonState' | 'forceEnlightenment' | 'forceAdventure' | 'highRiskEvent' | 'inheritanceEvent' | 'positiveFate' | 'negativeFate' | 'simulateCombatDeath' | 'luckHigh' | 'luckLow' | 'riskLevel' | 'createSect' | 'joinSect' | 'generateNpc' | 'modifyRelationship' | 'createCultivationFamily' | 'changeSectRelation' | 'advanceNpcAge'
-  type CombatDebugAction = 'forceCombat' | 'setEnemyPower' | 'setPlayerPower' | 'simulateCombatVictory' | 'simulateCombatDefeat' | 'addArtifact' | 'addSecretArt'
+  type CombatDebugAction = 'forceCombat' | 'adventureWolfCombat' | 'lifeRogueCombat' | 'sectSparringCombat' | 'setEnemyPower' | 'setPlayerPower' | 'simulateCombatVictory' | 'simulateCombatDefeat' | 'simulateCombatEscape' | 'addArtifact' | 'addSecretArt' | 'testBattleCard' | 'skipCombatAnimation' | 'v6Equipment' | 'v6Artifact' | 'v6Pill' | 'v6Material' | 'v6Equip' | 'v6Unequip' | 'v6Bind' | 'v6Nourish' | 'v6Affinity' | 'v6Toxicity' | 'v6FoundationPill' | 'v6LongevityPill' | 'v6HealingPill' | 'v6RootPill' | 'v6OpenRealm' | 'v6EnterRealm' | 'v6RealmDepth' | 'v6RealmCombat' | 'v6RealmReward' | 'v6RealmEvent' | 'v6RealmEscape' | 'v6RealmClear' | 'v6RealmDeath'
   function debug(action: DebugAction | CombatDebugAction) {
     if (action === 'points') state.reincarnation.totalPoints += 500
     if (action === 'unlockTalents') state.reincarnation.unlockedTalents = TALENTS.map((talent) => talent.id)
@@ -1128,6 +1383,14 @@ export const useGameStore = defineStore('game', () => {
     if (action === 'changeSectRelation' && state.world.sectRelations[0]) changeSectRelation(state.world.sectRelations[0], state.world.sectRelations[0].type === '敌对' ? 100 : -100, state.world.currentYear)
     if (action === 'advanceNpcAge') for (const npc of state.world.npcCultivators) simulateNPCCultivator(npc, 120, state.world.currentYear + 10, random)
     if (action === 'forceCombat') { state.pendingEvent = null; state.pendingLifeEvent = null; state.pendingCombat = null; startCombat('beast', 0, 'debug', '调试演武场') }
+    if (action === 'adventureWolfCombat') { state.pendingEvent = null; state.pendingLifeEvent = null; state.pendingCombat = null; startCombat('beast', 0, 'adventure', '青云山脉', undefined, { sourceType: 'ADVENTURE', sourceId: 'debug-wolf', location: '青云山脉', riskLevel: 2, mode: 'overlay', returnState: { label: '继续历练' } }) }
+    if (action === 'lifeRogueCombat') { state.pendingEvent = null; state.pendingCombat = null; triggerLifeEvent('rogue-cultivator-ambush') }
+    if (action === 'sectSparringCombat') {
+      state.pendingEvent = null; state.pendingLifeEvent = null; state.pendingCombat = null
+      const npc = sectPeers.value[0]
+      if (npc) startNPCCombat(npc.id, 'sect')
+      else ready.debugSecret = '当前宗门没有可切磋的同期修士。'
+    }
     if (action === 'setEnemyPower' && state.pendingCombat) state.pendingCombat.enemy.combatPower = Math.max(50, refreshCombatPower() * 2)
     if (action === 'setPlayerPower') {
       current.equippedArtifacts = current.equippedArtifacts.filter((entry) => entry.id !== 'debug-power-seal')
@@ -1136,6 +1399,8 @@ export const useGameStore = defineStore('game', () => {
     }
     if (action === 'simulateCombatVictory') resolvePendingCombat(CombatStrategy.BALANCED, undefined, 'victory')
     if (action === 'simulateCombatDefeat') resolvePendingCombat(CombatStrategy.BALANCED, undefined, 'defeat')
+    if (action === 'simulateCombatEscape') resolvePendingCombat(CombatStrategy.ESCAPE, undefined, 'escape')
+    if (action === 'skipCombatAnimation') ready.combatAnimationSkipToken++
     if (action === 'addArtifact') {
       const artifact = ARTIFACT_CATALOG.find((entry) => !current.equippedArtifacts.some((owned) => owned.id === entry.id)) ?? ARTIFACT_CATALOG[0]
       current.equippedArtifacts = [...current.equippedArtifacts.filter((entry) => entry.slot !== artifact.slot), { ...artifact }]
@@ -1147,6 +1412,35 @@ export const useGameStore = defineStore('game', () => {
       if (owned) owned.charges++
       else current.battleCards.push({ ...card })
     }
+    if (action === 'testBattleCard') {
+      const card = BATTLE_CARD_CATALOG.find((entry) => entry.id === 'blood-burning')!
+      const owned = current.battleCards.find((entry) => entry.id === card.id)
+      if (owned) owned.charges++
+      else current.battleCards.push({ ...card })
+    }
+    if (action === 'v6Equipment') addItem('green-edge-weapon')
+    if (action === 'v6Artifact') addItem('frost-edge-sword')
+    if (action === 'v6Pill') addItem('healing-pill', 3)
+    if (action === 'v6Material') { addItem('green-spirit-herb', 10); addItem('black-iron', 5); addItem('beast-bone', 5) }
+    if (action === 'v6Equip') { addItem('frost-edge-sword'); equipInventoryItem('frost-edge-sword') }
+    if (action === 'v6Unequip' && current.equipment.weapon) unequipInventoryItem(current.equipment.weapon)
+    if (action === 'v6Bind') { current.realmIndex = Math.max(11, current.realmIndex); addItem('frost-edge-sword'); bindArtifactItem('frost-edge-sword') }
+    if (action === 'v6Nourish') nourishArtifact(100, 5)
+    if (action === 'v6Affinity' && current.boundArtifact) current.boundArtifact.affinity = Math.min(100, current.boundArtifact.affinity + 10)
+    if (action === 'v6Toxicity') current.pillToxicity = 80
+    if (action === 'v6FoundationPill') addItem('foundation-pill')
+    if (action === 'v6LongevityPill') { addItem('longevity-pill'); useItem('longevity-pill') }
+    if (action === 'v6HealingPill') { addCharacterState(current, CharacterState.SERIOUS_INJURY); addItem('healing-pill'); useItem('healing-pill') }
+    if (action === 'v6RootPill') { if (!current.spiritualAptitude.acquiredRoots.some((root) => root.element === '火')) acquireSpiritRoot(current.spiritualAptitude, '火', 55, 60, '调试台', state.world.currentYear, state.world.currentMonth); addItem('fire-root-pill'); useItem('fire-root-pill') }
+    if (action === 'v6OpenRealm') openSecretRealm(current.secretRealmStates, 'myriad-sword', '调试台', state.world.currentYear + 99)
+    if (action === 'v6EnterRealm') { state.secretRealmRun = null; openSecretRealm(current.secretRealmStates, 'azure-cloud', '调试台'); enterSecretRealm('azure-cloud') }
+    if (action === 'v6RealmDepth' && state.secretRealmRun) state.secretRealmRun.currentDepth = Math.min((activeSecretRealm.value?.maxDepth ?? 1) - 1, state.secretRealmRun.currentDepth + 1)
+    if (action === 'v6RealmCombat' && state.secretRealmRun) { state.secretRealmRun.awaitingDecision = false; const realm = activeSecretRealm.value; if (realm) { const target = realm.encounters.find((entry) => entry.type === 'COMBAT'); if (target) { state.secretRealmRun.currentDepth = Math.max(0, realm.encounters.indexOf(target)); exploreSecretRealm() } } }
+    if (action === 'v6RealmReward' && state.secretRealmRun) { state.secretRealmRun.pendingEncounter = { id: 'debug-reward', name: '调试宝库', description: '调试奖励层', type: 'TREASURE', risk: 0, rewards: [{ itemId: 'five-element-stone', quantity: 3 }] }; resolveSecretRealmEncounter() }
+    if (action === 'v6RealmEvent' && state.secretRealmRun) { state.secretRealmRun.pendingEncounter = { id: 'debug-event', name: '调试石碑', description: '调试事件层', type: 'EVENT', risk: 0, rewards: [{ itemId: 'five-element-pill', quantity: 1 }] }; resolveSecretRealmEncounter() }
+    if (action === 'v6RealmEscape') leaveSecretRealm()
+    if (action === 'v6RealmClear' && state.secretRealmRun) { state.secretRealmRun.status = 'CLEARED'; leaveSecretRealm() }
+    if (action === 'v6RealmDeath') failSecretRealm('调试秘境死劫')
     if (action === 'addFateTag') addFateTag(current, { id: `DEBUG_FATE_${current.fateTags.length + 1}`, name: '调试因果', description: '由 Debug Panel 添加。', createdAt: state.world.currentYear })
     if (action === 'removeFateTag') current.fateTags.pop()
     if (action === 'fateProgress') {
@@ -1212,11 +1506,12 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, pendingCombat, combatPower, combatAssessment, currentSect, sectPeers, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration,
+    state, ready, player, currentRealm, breakthroughChance, breakthroughRequirements, pendingEvent, pendingLifeEvent, pendingCombat, combatPower, combatAssessment, currentSect, currentSectOfferings, sectPeers, ageYears, remainingYears, agingStatus, canBecomeGhost, eligibleDescendants, isFirstGeneration, activeSecretRealm, availableSecretRealms,
     initialize, createCharacter, cultivate, adventure, advanceYear, breakthrough, chooseEvent, chooseLifeEvent, closeEventResult, triggerRandomEvent, triggerLifeEvent, lifeEventPool, continueAsDescendant,
     enterReincarnationHall, beginReincarnationCreation, purchaseFate, canPurchaseFate: (purchase: FatePurchase) => canPurchaseFate(state.reincarnation, purchase),
     modifyStat, selectPrimaryPath, selectSecondaryPath, pathPractice, bloodRite, becomeGhost, finalizeMortalDeath, regenerateWorld, debugWorld, useItem,
-    learnTechnique, selectTechnique, improveAcquiredRoot, joinPlayerSect, donateSectResources, exchangeSectTechnique, chooseMaster, changePlayerRelationship, establishCultivationFamily, equipArtifactFromItem, prepareBattleCardFromItem,
+    learnTechnique, selectTechnique, improveAcquiredRoot, joinPlayerSect, donateSectResources, exchangeSectTechnique, exchangeSectOffering, chooseMaster, changePlayerRelationship, establishCultivationFamily, equipArtifactFromItem, equipInventoryItem, unequipInventoryItem, bindArtifactItem, unbindArtifactItem, nourishArtifact, prepareBattleCardFromItem, craftRecipe,
+    enterSecretRealm, exploreSecretRealm, continueSecretRealm, leaveSecretRealm, failSecretRealm,
     startCombat, startNPCCombat, resolvePendingCombat, refreshCombatPower, battleCardCatalog: BATTLE_CARD_CATALOG, artifactCatalog: ARTIFACT_CATALOG, techniqueCatalog: TECHNIQUES, actionCatalog: CULTIVATION_ACTIONS, manualSave, resetGame, replaceState, debug,
   }
 })

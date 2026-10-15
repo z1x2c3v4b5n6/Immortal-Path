@@ -5,6 +5,8 @@ import { techniqueById } from '../../data/techniques'
 import { calculateTechniqueAffinity } from '../techniques/techniques'
 import { isFiveElementImbalanced } from '../aptitude/aptitude'
 import { cultivationStateMultiplier } from '../actions/actionEffects'
+import { equipmentEffectTotal } from '../items/equipment'
+import { pillEffectMultiplier } from '../items/pills'
 
 export function calculateCultivationGain(player: Player, months: number, world?: WorldState): number {
   const realm = REALMS[player.realmIndex]
@@ -28,6 +30,8 @@ export function calculateCultivationGain(player: Player, months: number, world?:
   const techniqueMultiplier = technique && affinity?.meetsMinimum ? (1 + (technique.baseCultivationEfficiency - 1) * affinityScale) * (1 + techniqueLevel * .01) : technique ? .72 : 1
   const acquiredMultiplier = player.acquiredTalents.some((talent) => talent.talentId === 'late-bloom') && player.ageMonths >= player.lifespanMonths * .6 ? 1.08 : 1
   const imbalanceMultiplier = technique && technique.elements.length > 1 && isFiveElementImbalanced(player.spiritualAptitude) && !player.acquiredTalents.some((talent) => talent.talentId === 'five-unity') ? .94 : 1
-  const finalMultiplier = Math.max(.3, Math.min(3.6, rootMultiplier * talentMultiplier * comprehensionMultiplier * variance * pathMultiplier * techniqueMultiplier * acquiredMultiplier * imbalanceMultiplier * cultivationStateMultiplier(player)))
+  const equipmentMultiplier = 1 + equipmentEffectTotal(player, 'MEDITATION_EFFICIENCY')
+  const toxicityMultiplier = .94 + pillEffectMultiplier(player.pillToxicity) * .06
+  const finalMultiplier = Math.max(.3, Math.min(3.6, rootMultiplier * talentMultiplier * comprehensionMultiplier * variance * pathMultiplier * techniqueMultiplier * acquiredMultiplier * imbalanceMultiplier * cultivationStateMultiplier(player) * equipmentMultiplier * toxicityMultiplier))
   return Math.max(1, Math.round(realm.cultivationBase * months * finalMultiplier))
 }

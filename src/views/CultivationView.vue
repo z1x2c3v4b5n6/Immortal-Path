@@ -8,12 +8,16 @@ import { techniqueById } from '../data/techniques'
 import { calculateTechniqueAffinity } from '../core/techniques/techniques'
 import { CharacterState, type CultivationAction, type CultivationPathId } from '../models'
 import { useGameStore } from '../stores/game'
+import { REALMS } from '../data/realms'
+import { pillById } from '../data/pills'
 
 const game = useGameStore()
 const selectedYears = ref<Partial<Record<CultivationAction, number>>>({})
 const useAuxiliaries = ref(false)
 const useDemonicSacrifice = ref(false)
-const chance = computed(() => game.player ? calculateBreakthroughChance(game.player, game.state.world, { useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value }) : null)
+const selectedBreakthroughPill = ref('')
+const breakthroughPills = computed(() => game.player ? game.player.inventory.filter((entry) => entry.quantity > 0).map((entry) => ({ stack: entry, pill: pillById(entry.itemId) })).filter((entry) => entry.pill?.effects.some((effect) => effect.type === 'BREAKTHROUGH' && effect.target === REALMS[game.player!.realmIndex + 1]?.group)) : [])
+const chance = computed(() => game.player ? calculateBreakthroughChance(game.player, game.state.world, { useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value, pillId: selectedBreakthroughPill.value || undefined }) : null)
 const requirements = computed(() => game.breakthroughRequirements)
 const primaryProgress = computed(() => game.player?.pathProgress.find((entry) => entry.pathId === game.player?.primaryPath))
 const selectablePrimary = computed(() => CULTIVATION_PATHS.filter((path) => path.id !== 'ghost' && game.player?.unlockedPaths.includes(path.id)))
@@ -35,7 +39,7 @@ const stateNames: Record<CharacterState, string> = {
 function duration(action: CultivationAction, fallback: number) { return selectedYears.value[action] ?? fallback }
 function chooseDuration(action: CultivationAction, years: number) { selectedYears.value[action] = years }
 function perform(action: CultivationAction, fallback: number) { game.advanceYear(action, duration(action, fallback)) }
-function attemptBreakthrough() { game.breakthrough({ useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value }) }
+function attemptBreakthrough() { game.breakthrough({ useAuxiliaries: useAuxiliaries.value, useDemonicSacrifice: useDemonicSacrifice.value, pillId: selectedBreakthroughPill.value || undefined }) }
 function choosePrimary(pathId: CultivationPathId) { game.selectPrimaryPath(pathId) }
 function chooseSecondary(pathId: CultivationPathId) { game.selectSecondaryPath(pathId) }
 function affinity(technique: (typeof game.techniqueCatalog)[number]) {
@@ -58,7 +62,7 @@ function affinity(technique: (typeof game.techniqueCatalog)[number]) {
         <div><dt>主修功法</dt><dd>{{ activeTechnique ? `《${activeTechnique.name}》 Lv.${activeTechniqueProgress?.level ?? 1}` : '尚未选定' }}</dd></div>
         <div><dt>肉身</dt><dd>{{ BODY_REALM_NAMES[game.player.bodyRealm] }} · {{ game.player.bodyTrainingProgress }}</dd></div>
         <div><dt>突破准备</dt><dd>{{ Math.floor(game.player.breakthroughProgress) }}%</dd></div>
-        <div><dt>状态</dt><dd>{{ game.player.characterStates.map(state => stateNames[state]).join(' · ') }}</dd></div>
+        <div><dt>状态 / 丹毒</dt><dd>{{ game.player.characterStates.map(state => stateNames[state]).join(' · ') }} · {{ Math.round(game.player.pillToxicity) }}</dd></div>
       </dl>
     </section>
 
@@ -84,7 +88,8 @@ function affinity(technique: (typeof game.techniqueCatalog)[number]) {
       <p v-if="requirements && requirements.missing.length" class="missing">{{ requirements.missing.join(' · ') }}</p>
       <div v-if="chance" class="chance-breakdown"><span>基础 <b>{{ Math.round(chance.base * 100) }}%</b></span><span>悟性 <b>{{ chance.comprehension >= 0 ? '+' : '' }}{{ Math.round(chance.comprehension * 100) }}%</b></span><span>气运 <b>{{ chance.luck >= 0 ? '+' : '' }}{{ Math.round(chance.luck * 100) }}%</b></span><span>灵根 <b>{{ chance.spiritRoot >= 0 ? '+' : '' }}{{ Math.round(chance.spiritRoot * 100) }}%</b></span><span>功法契合 <b>{{ chance.technique >= 0 ? '+' : '' }}{{ Math.round(chance.technique * 100) }}%</b></span></div>
       <div v-if="chance" class="chance-breakdown"><span>道途 <b>{{ chance.path >= 0 ? '+' : '' }}{{ Math.round(chance.path * 100) }}%</b></span><span>天赋 <b>{{ chance.talent >= 0 ? '+' : '' }}{{ Math.round(chance.talent * 100) }}%</b></span><span>状态 <b>{{ chance.state >= 0 ? '+' : '' }}{{ Math.round(chance.state * 100) }}%</b></span><span>准备 <b>+{{ Math.round(chance.preparation * 100) }}%</b></span><span>辅助 <b>+{{ Math.round(chance.auxiliary * 100) }}%</b></span></div>
-      <div class="breakthrough-options"><label><input v-model="useAuxiliaries" type="checkbox"> 使用可用辅助物（筑基丹、灵药及道途资源）</label><label v-if="game.player.primaryPath === 'demonic'"><input v-model="useDemonicSacrifice" type="checkbox"> 血祭五年寿元与十点魔性</label></div>
+      <div class="breakthrough-options"><label><input v-model="useAuxiliaries" type="checkbox"> 使用可用灵药与道途资源</label><label v-if="game.player.primaryPath === 'demonic'"><input v-model="useDemonicSacrifice" type="checkbox"> 血祭五年寿元与十点魔性</label></div>
+      <div v-if="breakthroughPills.length" class="breakthrough-pill-choice"><label>辅助丹药</label><select v-model="selectedBreakthroughPill"><option value="">不使用丹药</option><option v-for="entry in breakthroughPills" :key="entry.stack.itemId" :value="entry.stack.itemId">{{ entry.pill?.name }} ×{{ entry.stack.quantity }} · {{ entry.pill?.effects.find(effect => effect.type === 'BREAKTHROUGH')?.description }}</option></select><small>仅在点击“突破”并真正开始破境时消耗；取消选择不会消耗。</small></div>
       <p v-if="chance?.aid.descriptions.length" class="aid-note">本次将消耗：{{ chance.aid.descriptions.join(' · ') }}</p><p v-else class="aid-note">辅助物不是突破门票；不投入资源也可直接尝试。</p></div>
       <div class="breakthrough-attempt"><small>当前成功率</small><strong>{{ chance ? Math.round(chance.final * 100) : 0 }}%</strong><button class="primary" :disabled="!requirements?.ready" @click="attemptBreakthrough">突破</button></div>
     </section>
@@ -109,4 +114,5 @@ function affinity(technique: (typeof game.techniqueCatalog)[number]) {
 @media(max-width:900px){.action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.focus-details{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:600px){.action-grid{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(2,1fr)}.cultivation-logs li{grid-template-columns:1fr;gap:4px}}
 .breakthrough-copy{flex:1}.chance-breakdown{display:grid;grid-template-columns:repeat(5,minmax(86px,1fr));gap:7px;margin:10px 0}.chance-breakdown span{padding:8px;border:1px solid rgba(200,164,91,.16);color:var(--muted);font-size:.78rem}.chance-breakdown b{display:block;margin-top:3px;color:#e2c178}.breakthrough-options{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px}.breakthrough-options label{cursor:pointer;color:var(--muted);font-size:.86rem}.aid-note{margin:8px 0 0;color:#bcae91;font-size:.82rem}.breakthrough-attempt{min-width:120px;text-align:center}.breakthrough-attempt small{display:block;color:var(--muted)}.breakthrough-attempt strong{display:block;margin:4px 0 10px;color:#e6c575;font-size:2rem}
+.breakthrough-pill-choice{display:grid;grid-template-columns:auto minmax(220px,1fr);gap:8px 12px;align-items:center;margin-top:12px}.breakthrough-pill-choice select{padding:8px;background:#121815;color:#e4d3ac;border:1px solid rgba(200,164,91,.28)}.breakthrough-pill-choice small{grid-column:2;color:var(--muted)}
 </style>

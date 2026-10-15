@@ -4,6 +4,7 @@ import AppSidebarNav from './AppSidebarNav.vue'
 import ContextPanel from './ContextPanel.vue'
 import PlayerSidebar from './PlayerSidebar.vue'
 import PlayerSummaryBar from './PlayerSummaryBar.vue'
+import CombatOverlay from './combat/CombatOverlay.vue'
 import { useGameStore } from '../stores/game'
 
 const game = useGameStore()
@@ -28,5 +29,6 @@ const detailsOpen = ref(false)
         </div>
       </div>
     </Transition>
+    <CombatOverlay />
   </div>
 </template>

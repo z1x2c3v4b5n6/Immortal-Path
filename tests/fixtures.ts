@@ -7,6 +7,8 @@ import { createSpiritRoot } from '../src/data/spiritRoots'
 import { createSpiritualAptitude } from '../src/core/aptitude/aptitude'
 import { initialCultivationResources } from '../src/core/actions/actionEffects'
 import { initialBattleStats } from '../src/core/combat/combat'
+import { emptyEquipment } from '../src/core/items/equipment'
+import { initialSecretRealmStates } from '../src/core/secretRealm/secretRealm'
 import { BodyRealm, CharacterState, type Descendant, type GameSave, type Player, type WorldState } from '../src/models'
 
 export function worldFixture(overrides: Partial<WorldState> = {}): WorldState {
@@ -34,6 +36,7 @@ export function playerFixture(overrides: Partial<Player> = {}): Player {
     bodyRealm: BodyRealm.SKIN, bodyTrainingProgress: 0,
     eventRiskHistory: [], dangerRecords: [], majorOpportunities: [], inheritanceHistory: [], discipleIds: [], socialHistory: [],
     combatPower: 0, combatHistory: [], battleAchievements: [], equippedArtifacts: [], battleCards: [], battleStats: initialBattleStats(),
+    equipment: emptyEquipment(), boundArtifact: null, pillToxicity: 0, consumedPillHistory: [], knownRecipes: ['make-qi-pill'], secretRealmStates: initialSecretRealmStates(), secretRealmHistory: [], itemSourceHistory: [],
   }
   return { ...player, ...overrides }
 }
@@ -43,7 +46,7 @@ export function saveFixture(overrides: Partial<GameSave> = {}): GameSave {
   const save: GameSave = {
     id: 'main', version: CURRENT_SAVE_VERSION, createdAt: now, updatedAt: now,
     player: playerFixture(), world: worldFixture(), lifeRecords: [], reincarnation: initialReincarnation(),
-    settings: { fortunateMode: true, autoSave: false, logLimit: 120 }, pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0 }, logs: [], pendingEvent: null, pendingLifeEvent: null, currentAction: null, pendingCombat: null,
+    settings: { fortunateMode: true, autoSave: false, logLimit: 120 }, pity: { rollsWithoutRare: 0, rollsWithoutEpic: 0 }, logs: [], pendingEvent: null, pendingLifeEvent: null, currentAction: null, pendingCombat: null, secretRealmRun: null,
   }
   return { ...save, ...overrides }
 }
